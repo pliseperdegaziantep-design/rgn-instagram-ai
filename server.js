@@ -23,6 +23,44 @@ app.get("/health", (_req, res) => {
   });
 });
 
+app.get("/privacy", (_req, res) => {
+  res.status(200).type("html").send(`<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gizlilik Politikası | PPG CHAT AI</title>
+</head>
+<body style="font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6">
+  <h1>Gizlilik Politikası</h1>
+  <p><strong>PPG CHAT AI</strong>, Instagram üzerinden gelen mesajlara yanıt vermek ve müşteri taleplerini yönetmek amacıyla çalışır.</p>
+  <p>İşlenen veriler; kullanıcı adı, mesaj içeriği ve kullanıcı tarafından gönüllü olarak paylaşılan sipariş bilgilerinden oluşabilir.</p>
+  <p>Bu veriler yalnızca müşteri desteği, fiyatlandırma, sipariş oluşturma ve ilgili hizmetlerin sunulması amacıyla kullanılır.</p>
+  <p>Veriler izinsiz şekilde üçüncü taraflara satılmaz veya paylaşılmaz. Yasal zorunluluklar dışında yalnızca hizmetin çalışması için gerekli altyapı sağlayıcıları kullanılabilir.</p>
+  <p>Kullanıcılar verilerinin silinmesini talep edebilir.</p>
+  <p>İletişim: <a href="mailto:elexusperde@gmail.com">elexusperde@gmail.com</a></p>
+  <p>Son güncelleme: 10 Temmuz 2026</p>
+</body>
+</html>`);
+});
+
+app.get("/data-deletion", (_req, res) => {
+  res.status(200).type("html").send(`<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Veri Silme Talimatları | PPG CHAT AI</title>
+</head>
+<body style="font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6">
+  <h1>Veri Silme Talimatları</h1>
+  <p>PPG CHAT AI tarafından işlenen kişisel verilerinizin silinmesini talep etmek için aşağıdaki e-posta adresine yazabilirsiniz:</p>
+  <p><a href="mailto:elexusperde@gmail.com">elexusperde@gmail.com</a></p>
+  <p>Talebinizde Instagram kullanıcı adınızı ve silinmesini istediğiniz bilgileri belirtin. Talebiniz doğrulandıktan sonra ilgili kayıtlar makul süre içinde silinir.</p>
+</body>
+</html>`);
+});
+
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -46,7 +84,6 @@ app.get("/webhook", (req, res) => {
 });
 
 app.post("/webhook", (req, res) => {
-  // Meta requires a fast response. Acknowledge first, then inspect events.
   res.sendStatus(200);
 
   try {
@@ -67,7 +104,6 @@ app.post("/webhook", (req, res) => {
 
         processedMessageIds.add(messageId);
 
-        // Keep memory bounded on long-running instances.
         if (processedMessageIds.size > 5000) {
           processedMessageIds.clear();
           processedMessageIds.add(messageId);
