@@ -7,6 +7,7 @@ const PORT = process.env.PORT || 10000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const INSTAGRAM_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN;
 const INSTAGRAM_USER_ID = process.env.INSTAGRAM_USER_ID;
+const GRAPH_API_VERSION = process.env.GRAPH_API_VERSION || "v25.0";
 
 // Prevent the same webhook message from being processed repeatedly.
 const processedMessageIds = new Set();
@@ -83,42 +84,95 @@ app.get("/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
-app.post("/webhook", (req, res) => {
-  res.sendStatus(200);
+async function sendInstagramText(recipientId, text) {
+  if (!INSTAGRAM_ACCESS_TOKEN || !INSTAGRAM_USER_ID) {
+    throw new Error("INSTAGRAM_ACCESS_TOKEN or INSTAGRAM_USER_ID is missing.");
+  }
+
+  const url = `https://graph.instagram.com/${GRAPH_API_VERSION}/${encodeURIComponent(
+    INSTAGRAM_USER_ID
+  )}/messages`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${INSTAGRAM_ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      recipient: { id: recipientId },
+      message: { text },
+    }),
+  });
+
+  const responseText = await response.text();
+  let result;
 
   try {
-    const entries = Array.isArray(req.body?.entry) ? req.body.entry : [];
+    result = JSON.parse(responseText);
+  } catch {
+    result = responseText;
+  }
 
-    for (const entry of entries) {
-      const messagingEvents = Array.isArray(entry?.messaging)
-        ? entry.messaging
-        : [];
+  if (!response.ok) {
+    throw new Error(
+      `Instagram send failed (${response.status}): ${JSON.stringify(result)}`
+    );
+  }
 
-      for (const event of messagingEvents) {
-        const messageId = event?.message?.mid;
-        const senderId = event?.sender?.id;
-        const text = event?.message?.text;
+  return result;
+}
 
-        if (!messageId || !senderId) continue;
-        if (processedMessageIds.has(messageId)) continue;
+async function processWebhook(body) {
+  const entries = Array.isArray(body?.entry) ? body.entry : [];
 
+  for (const entry of entries) {
+    const messagingEvents = Array.isArray(entry?.messaging)
+      ? entry.messaging
+      : [];
+
+    for (const event of messagingEvents) {
+      const messageId = event?.message?.mid;
+      const senderId = event?.sender?.id;
+      const text = event?.message?.text;
+      const isEcho = Boolean(event?.message?.is_echo);
+
+      if (!messageId || !senderId || isEcho) continue;
+      if (String(senderId) === String(INSTAGRAM_USER_ID)) continue;
+      if (processedMessageIds.has(messageId)) continue;
+
+      processedMessageIds.add(messageId);
+
+      if (processedMessageIds.size > 5000) {
+        processedMessageIds.clear();
         processedMessageIds.add(messageId);
+      }
 
-        if (processedMessageIds.size > 5000) {
-          processedMessageIds.clear();
-          processedMessageIds.add(messageId);
-        }
+      console.log("Instagram DM received:", {
+        messageId,
+        senderId,
+        text: typeof text === "string" ? text : null,
+      });
 
-        console.log("Instagram DM received:", {
-          messageId,
-          senderId,
-          text: typeof text === "string" ? text : null,
-        });
+      const reply =
+        "Merhaba 👋 Mesajınız bize ulaştı. Size yardımcı olabilmemiz için uygulama alanını yazar mısınız? Cam balkon, PVC pencere veya farklı bir alan mı?";
+
+      try {
+        const sendResult = await sendInstagramText(senderId, reply);
+        console.log("Instagram automatic reply sent:", sendResult);
+      } catch (error) {
+        console.error("Instagram automatic reply error:", error.message);
       }
     }
-  } catch (error) {
-    console.error("Webhook processing error:", error);
   }
+}
+
+app.post("/webhook", (req, res) => {
+  // Meta expects a fast response. Process the event after acknowledging it.
+  res.sendStatus(200);
+  void processWebhook(req.body).catch((error) => {
+    console.error("Webhook processing error:", error);
+  });
 });
 
 app.use((_req, res) => {
