@@ -8,8 +8,9 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const INSTAGRAM_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN;
 const INSTAGRAM_USER_ID = process.env.INSTAGRAM_USER_ID;
 const GRAPH_API_VERSION = process.env.GRAPH_API_VERSION || "v25.0";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 
-// Prevent the same webhook message from being processed repeatedly.
 const processedMessageIds = new Set();
 
 app.get("/", (_req, res) => {
@@ -21,45 +22,27 @@ app.get("/health", (_req, res) => {
     status: "ok",
     instagramTokenConfigured: Boolean(INSTAGRAM_ACCESS_TOKEN),
     instagramUserIdConfigured: Boolean(INSTAGRAM_USER_ID),
+    openaiConfigured: Boolean(OPENAI_API_KEY),
+    openaiModel: OPENAI_MODEL,
   });
 });
 
 app.get("/privacy", (_req, res) => {
   res.status(200).type("html").send(`<!doctype html>
-<html lang="tr">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Gizlilik Politikası | PPG CHAT AI</title>
-</head>
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gizlilik Politikası | PPG CHAT AI</title></head>
 <body style="font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6">
-  <h1>Gizlilik Politikası</h1>
-  <p><strong>PPG CHAT AI</strong>, Instagram üzerinden gelen mesajlara yanıt vermek ve müşteri taleplerini yönetmek amacıyla çalışır.</p>
-  <p>İşlenen veriler; kullanıcı adı, mesaj içeriği ve kullanıcı tarafından gönüllü olarak paylaşılan sipariş bilgilerinden oluşabilir.</p>
-  <p>Bu veriler yalnızca müşteri desteği, fiyatlandırma, sipariş oluşturma ve ilgili hizmetlerin sunulması amacıyla kullanılır.</p>
-  <p>Veriler izinsiz şekilde üçüncü taraflara satılmaz veya paylaşılmaz. Yasal zorunluluklar dışında yalnızca hizmetin çalışması için gerekli altyapı sağlayıcıları kullanılabilir.</p>
-  <p>Kullanıcılar verilerinin silinmesini talep edebilir.</p>
-  <p>İletişim: <a href="mailto:elexusperde@gmail.com">elexusperde@gmail.com</a></p>
-  <p>Son güncelleme: 10 Temmuz 2026</p>
-</body>
-</html>`);
+<h1>Gizlilik Politikası</h1><p><strong>PPG CHAT AI</strong>, Instagram üzerinden gelen mesajlara yanıt vermek ve müşteri taleplerini yönetmek amacıyla çalışır.</p>
+<p>İşlenen veriler; kullanıcı adı, mesaj içeriği ve kullanıcı tarafından gönüllü olarak paylaşılan sipariş bilgilerinden oluşabilir.</p>
+<p>Bu veriler yalnızca müşteri desteği, fiyatlandırma, sipariş oluşturma ve ilgili hizmetlerin sunulması amacıyla kullanılır.</p>
+<p>Veriler izinsiz şekilde üçüncü taraflara satılmaz veya paylaşılmaz.</p><p>Kullanıcılar verilerinin silinmesini talep edebilir.</p>
+<p>İletişim: <a href="mailto:elexusperde@gmail.com">elexusperde@gmail.com</a></p><p>Son güncelleme: 10 Temmuz 2026</p></body></html>`);
 });
 
 app.get("/data-deletion", (_req, res) => {
   res.status(200).type("html").send(`<!doctype html>
-<html lang="tr">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Veri Silme Talimatları | PPG CHAT AI</title>
-</head>
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Veri Silme Talimatları | PPG CHAT AI</title></head>
 <body style="font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.6">
-  <h1>Veri Silme Talimatları</h1>
-  <p>PPG CHAT AI tarafından işlenen kişisel verilerinizin silinmesini talep etmek için aşağıdaki e-posta adresine yazabilirsiniz:</p>
-  <p><a href="mailto:elexusperde@gmail.com">elexusperde@gmail.com</a></p>
-  <p>Talebinizde Instagram kullanıcı adınızı ve silinmesini istediğiniz bilgileri belirtin. Talebiniz doğrulandıktan sonra ilgili kayıtlar makul süre içinde silinir.</p>
-</body>
-</html>`);
+<h1>Veri Silme Talimatları</h1><p>Verilerinizin silinmesini talep etmek için <a href="mailto:elexusperde@gmail.com">elexusperde@gmail.com</a> adresine Instagram kullanıcı adınızla birlikte yazabilirsiniz.</p></body></html>`);
 });
 
 app.get("/webhook", (req, res) => {
@@ -84,15 +67,7 @@ app.get("/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
-async function sendInstagramText(recipientId, text) {
-  if (!INSTAGRAM_ACCESS_TOKEN || !INSTAGRAM_USER_ID) {
-    throw new Error("INSTAGRAM_ACCESS_TOKEN or INSTAGRAM_USER_ID is missing.");
-  }
-
-  const url = `https://graph.instagram.com/${GRAPH_API_VERSION}/${encodeURIComponent(
-    INSTAGRAM_USER_ID
-  )}/messages`;
-
+async function postInstagramMessage(url, recipientId, text) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -107,7 +82,97 @@ async function sendInstagramText(recipientId, text) {
 
   const responseText = await response.text();
   let result;
+  try {
+    result = JSON.parse(responseText);
+  } catch {
+    result = responseText;
+  }
 
+  return { ok: response.ok, status: response.status, result };
+}
+
+async function sendInstagramText(recipientId, text) {
+  if (!INSTAGRAM_ACCESS_TOKEN) {
+    throw new Error("INSTAGRAM_ACCESS_TOKEN is missing.");
+  }
+
+  // With Instagram Login, /me resolves the professional account belonging to the token.
+  // This avoids failures caused by an ID copied from a different Meta API flow.
+  const endpoints = [
+    `https://graph.instagram.com/${GRAPH_API_VERSION}/me/messages`,
+  ];
+
+  if (INSTAGRAM_USER_ID) {
+    endpoints.push(
+      `https://graph.instagram.com/${GRAPH_API_VERSION}/${encodeURIComponent(
+        INSTAGRAM_USER_ID
+      )}/messages`
+    );
+  }
+
+  let lastFailure;
+  for (const url of endpoints) {
+    const attempt = await postInstagramMessage(url, recipientId, text);
+    if (attempt.ok) return attempt.result;
+    lastFailure = attempt;
+    console.warn("Instagram send endpoint failed:", {
+      url: url.replace(INSTAGRAM_USER_ID || "__none__", "[IG_USER_ID]"),
+      status: attempt.status,
+      result: attempt.result,
+    });
+  }
+
+  throw new Error(
+    `Instagram send failed (${lastFailure?.status || "unknown"}): ${JSON.stringify(
+      lastFailure?.result || {}
+    )}`
+  );
+}
+
+function extractOpenAIText(payload) {
+  if (typeof payload?.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+
+  const parts = [];
+  for (const item of Array.isArray(payload?.output) ? payload.output : []) {
+    for (const content of Array.isArray(item?.content) ? item.content : []) {
+      if (content?.type === "output_text" && typeof content?.text === "string") {
+        parts.push(content.text);
+      }
+    }
+  }
+  return parts.join("\n").trim();
+}
+
+async function createAIReply(customerMessage) {
+  const fallback =
+    "Merhaba 👋 Plise Perde Gaziantep'e hoş geldiniz. Size yardımcı olabilmem için uygulama alanını yazar mısınız? Cam balkon, PVC pencere, kış bahçesi veya ofis mi?";
+
+  if (!OPENAI_API_KEY || !customerMessage) return fallback;
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      input: [
+        {
+          role: "system",
+          content:
+            "Sen Plise Perde Gaziantep'in Instagram satış asistanısın. Türkçe, kısa, doğal ve samimi cevap ver. İlk hedefin uygulama alanını öğrenmek olsun: cam balkon, PVC pencere, kış bahçesi veya ofis. Bilmediğin fiyatı uydurma. Her mesajda en fazla bir soru sor. Gereksiz uzun metin ve aşırı emoji kullanma.",
+        },
+        { role: "user", content: customerMessage },
+      ],
+      max_output_tokens: 180,
+    }),
+  });
+
+  const responseText = await response.text();
+  let result;
   try {
     result = JSON.parse(responseText);
   } catch {
@@ -116,11 +181,11 @@ async function sendInstagramText(recipientId, text) {
 
   if (!response.ok) {
     throw new Error(
-      `Instagram send failed (${response.status}): ${JSON.stringify(result)}`
+      `OpenAI request failed (${response.status}): ${JSON.stringify(result)}`
     );
   }
 
-  return result;
+  return extractOpenAIText(result) || fallback;
 }
 
 async function processWebhook(body) {
@@ -142,7 +207,6 @@ async function processWebhook(body) {
       if (processedMessageIds.has(messageId)) continue;
 
       processedMessageIds.add(messageId);
-
       if (processedMessageIds.size > 5000) {
         processedMessageIds.clear();
         processedMessageIds.add(messageId);
@@ -154,8 +218,17 @@ async function processWebhook(body) {
         text: typeof text === "string" ? text : null,
       });
 
-      const reply =
-        "Merhaba 👋 Mesajınız bize ulaştı. Size yardımcı olabilmemiz için uygulama alanını yazar mısınız? Cam balkon, PVC pencere veya farklı bir alan mı?";
+      if (typeof text !== "string" || !text.trim()) continue;
+
+      let reply;
+      try {
+        reply = await createAIReply(text.trim());
+        console.log("AI reply created:", reply);
+      } catch (error) {
+        console.error("OpenAI reply error:", error.message);
+        reply =
+          "Merhaba 👋 Mesajınız bize ulaştı. Uygulama yapılacak alan cam balkon, PVC pencere, kış bahçesi veya ofis mi?";
+      }
 
       try {
         const sendResult = await sendInstagramText(senderId, reply);
@@ -168,7 +241,6 @@ async function processWebhook(body) {
 }
 
 app.post("/webhook", (req, res) => {
-  // Meta expects a fast response. Process the event after acknowledging it.
   res.sendStatus(200);
   void processWebhook(req.body).catch((error) => {
     console.error("Webhook processing error:", error);
