@@ -38,7 +38,9 @@ function calculatePieceSquareMeters(widthCm, heightCm) {
   const roundedWidth = roundDimensionUpTo10(widthCm);
   const roundedHeight = roundDimensionUpTo10(heightCm);
   const rawSquareMeters = (roundedWidth / 100) * (roundedHeight / 100);
-  return Math.max(1, rawSquareMeters);
+
+  // KESİN KURAL: minimum 1 m² toplam siparişe değil, HER TEK PARÇAYA uygulanır.
+  return rawSquareMeters < 1 ? 1 : rawSquareMeters;
 }
 
 function extractMeasurements(text) {
@@ -69,6 +71,13 @@ function getTranscript(messages) {
     .join("\n");
 }
 
+function getUserTranscript(messages) {
+  return messages
+    .filter((message) => message?.role === "user")
+    .map((message) => String(message?.content || ""))
+    .join("\n");
+}
+
 function detectLatestSeries(messages) {
   let selectedSeries = null;
 
@@ -94,7 +103,7 @@ function detectServiceType(messages) {
       serviceType = "montajli";
     }
 
-    if (/demonte|kargolu|şehir dışı|sehir disi/i.test(content)) {
+    if (/montajsız|montajsiz|demonte|kargolu|şehir dışı|sehir disi/i.test(content)) {
       serviceType = "demonte";
     }
   }
@@ -111,6 +120,14 @@ function isPriceRequest(text) {
   return /fiyat|tutar|kaç tl|kac tl|ne kadar|hesap|ücret|ucret/i.test(text);
 }
 
+function hasPriceContext(messages) {
+  return messages.some((message) => isPriceRequest(String(message?.content || "")));
+}
+
+function isShortFollowUp(text) {
+  return /^(tamam|tamam olur|olur|evet|peki|aynen|uygun|hesapla|fiyat ver|söyle|soyle)[.!😊🙂👍\s]*$/i.test(text);
+}
+
 function formatTry(value) {
   return new Intl.NumberFormat("tr-TR", {
     maximumFractionDigits: 0,
@@ -123,9 +140,18 @@ function buildDeterministicPriceReply(messages) {
     .find((message) => message?.role === "user");
 
   const latestText = String(latestUserMessage?.content || "").trim();
-  if (!latestText || !isPriceRequest(latestText)) return null;
+  if (!latestText) return null;
 
-  const measurements = extractMeasurements(latestText);
+  // Fiyat talebi önceki mesajda verilmiş ve müşteri "tamam olur" gibi kısa bir
+  // devam cevabı vermiş olsa bile fiyatı AI'ya bırakma; kesin motor hesaplasın.
+  const shouldCalculate =
+    isPriceRequest(latestText) ||
+    (hasPriceContext(messages) && isShortFollowUp(latestText));
+
+  if (!shouldCalculate) return null;
+
+  // Ölçüler yalnızca son mesajda olmayabilir. Müşterinin önceki ölçülerini de kullan.
+  const measurements = extractMeasurements(getUserTranscript(messages));
   if (measurements.length === 0) return null;
 
   const series = detectLatestSeries(messages);
@@ -136,20 +162,22 @@ function buildDeterministicPriceReply(messages) {
   const unitPrice = PRICE_LIST[serviceType]?.[series];
   if (!unitPrice) return null;
 
-  const totalSquareMeters = measurements.reduce(
-    (sum, measurement) =>
-      sum + calculatePieceSquareMeters(measurement.width, measurement.height),
-    0
-  );
+  const totalSquareMeters = measurements.reduce((sum, measurement) => {
+    const pieceSquareMeters = calculatePieceSquareMeters(
+      measurement.width,
+      measurement.height
+    );
+    return sum + pieceSquareMeters;
+  }, 0);
 
   const exactTotal = totalSquareMeters * unitPrice;
   const roundedTotal = Math.round(exactTotal / 10) * 10;
   const serviceLabel = serviceType === "montajli" ? "montajlı" : "demonte";
-  const quantityLabel = measurements.length > 1 ? `${measurements.length} ölçü` : "tek ölçü";
+  const quantityLabel = measurements.length > 1 ? `${measurements.length} adet` : "tek adet";
 
-  return `${quantityLabel} için ${series} ${serviceLabel} toplam ${formatTry(
+  return `${quantityLabel} için ${series} ${serviceLabel} yaklaşık ${formatTry(
     roundedTotal
-  )} TL tutar 😊\n\nSipariş detaylarını WhatsApp'ta birlikte tamamlayabiliriz: 0530 028 89 03`;
+  )} TL tutar 😊\n\nNet sipariş detaylarını WhatsApp'ta birlikte tamamlayabiliriz: 0530 028 89 03`;
 }
 
 module.exports = {
