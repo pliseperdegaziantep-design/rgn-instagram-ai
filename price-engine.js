@@ -38,8 +38,6 @@ function calculatePieceSquareMeters(widthCm, heightCm) {
   const roundedWidth = roundDimensionUpTo10(widthCm);
   const roundedHeight = roundDimensionUpTo10(heightCm);
   const rawSquareMeters = (roundedWidth / 100) * (roundedHeight / 100);
-
-  // DEĞİŞMEZ KURAL: minimum 1 m² HER PARÇAYA ayrı uygulanır.
   return rawSquareMeters < 1 ? 1 : rawSquareMeters;
 }
 
@@ -55,14 +53,7 @@ function extractMeasurements(text) {
     const quantityAfter = match[4] ? Number(match[4]) : null;
     const quantity = quantityBefore || quantityAfter || 1;
 
-    if (
-      !Number.isFinite(width) ||
-      !Number.isFinite(height) ||
-      width <= 0 ||
-      height <= 0 ||
-      !Number.isFinite(quantity) ||
-      quantity <= 0
-    ) {
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
       continue;
     }
 
@@ -86,34 +77,27 @@ function getUserMessages(messages) {
 }
 
 function getUserTranscript(messages) {
-  return getUserMessages(messages)
-    .map((message) => String(message?.content || ""))
-    .join("\n");
+  return getUserMessages(messages).map((message) => String(message?.content || "")).join("\n");
 }
 
 function detectLatestSeries(messages) {
   let selectedSeries = null;
-
   for (const message of messages) {
     const content = String(message?.content || "");
     for (const [series, pattern] of SERIES_PATTERNS) {
       if (pattern.test(content)) selectedSeries = series;
     }
   }
-
   return selectedSeries;
 }
 
 function detectServiceType(messages) {
   let serviceType = null;
-
   for (const message of getUserMessages(messages)) {
     const content = String(message?.content || "");
-
     if (/montajlı|montajli|montaj dahil/i.test(content)) serviceType = "montajli";
     if (/montajsız|montajsiz|demonte|kargolu/i.test(content)) serviceType = "demonte";
   }
-
   return serviceType;
 }
 
@@ -122,9 +106,7 @@ function isPriceRequest(text) {
 }
 
 function hasPriceContext(messages) {
-  return getUserMessages(messages).some((message) =>
-    isPriceRequest(String(message?.content || ""))
-  );
+  return getUserMessages(messages).some((message) => isPriceRequest(String(message?.content || "")));
 }
 
 function isShortFollowUp(text) {
@@ -133,23 +115,19 @@ function isShortFollowUp(text) {
 
 function findLatestMeasurementText(messages) {
   const userMessages = getUserMessages(messages);
-
   for (let index = userMessages.length - 1; index >= 0; index -= 1) {
     const content = String(userMessages[index]?.content || "").trim();
     if (extractMeasurements(content).length > 0) return content;
   }
-
   return "";
 }
 
 function findLatestCamCount(messages) {
   const userMessages = getUserMessages(messages);
-
   for (let index = userMessages.length - 1; index >= 0; index -= 1) {
     const count = extractCamCount(userMessages[index]?.content);
     if (count) return count;
   }
-
   return null;
 }
 
@@ -158,47 +136,36 @@ function formatTry(value) {
 }
 
 function buildDeterministicPriceReply(messages) {
-  const latestUserMessage = [...messages]
-    .reverse()
-    .find((message) => message?.role === "user");
-
+  const latestUserMessage = [...messages].reverse().find((message) => message?.role === "user");
   const latestText = String(latestUserMessage?.content || "").trim();
   if (!latestText) return null;
 
   const latestMeasurements = extractMeasurements(latestText);
   const latestCamCount = extractCamCount(latestText);
   const priceContext = hasPriceContext(messages);
-  const shouldHandlePrice =
-    isPriceRequest(latestText) ||
-    latestMeasurements.length > 0 ||
-    latestCamCount !== null ||
-    (priceContext && isShortFollowUp(latestText));
-
+  const shouldHandlePrice = isPriceRequest(latestText) || latestMeasurements.length > 0 || latestCamCount !== null || (priceContext && isShortFollowUp(latestText));
   if (!shouldHandlePrice) return null;
 
   const serviceType = detectServiceType(messages);
   const userTranscript = getUserTranscript(messages);
 
-  // Fiyat hesabında hizmet tipi ASLA tahmin edilmez.
   if (!serviceType) {
     return "Tabii 😊 Fiyatı doğru hesaplamam için demonte mi, montajlı mı hizmet istiyorsunuz?\n\nNot: Montajlı hizmetimiz yalnızca Gaziantep içinde geçerlidir.";
   }
 
-  // Montajlı fiyat yalnızca Gaziantep için verilir.
   if (serviceType === "montajli" && !/gaziantep/i.test(userTranscript)) {
     return "Montajlı hizmetimiz yalnızca Gaziantep içinde geçerlidir 😊 Uygulama Gaziantep'te mi?";
   }
 
   const series = detectLatestSeries(messages);
   if (!series) {
-    return "Fiyatı doğru hesaplamam için hangi kumaş serisini düşündüğünüzü yazar mısınız? 😊 NOVA, Neo Fashion, Nano Clean, Nano Insulation, Nano Pro veya Honeycomp.";
+    return "Ekonomik başlangıç seçeneği olarak öncelikle NOVA serimizi önerebilirim 😊 Fiyatı NOVA üzerinden hesaplayayım mı?";
   }
 
   const unitPrice = PRICE_LIST[serviceType]?.[series];
   if (!unitPrice) return null;
 
-  const measurementText =
-    latestMeasurements.length > 0 ? latestText : findLatestMeasurementText(messages);
+  const measurementText = latestMeasurements.length > 0 ? latestText : findLatestMeasurementText(messages);
   const measurements = extractMeasurements(measurementText);
 
   let totalSquareMeters = 0;
@@ -207,18 +174,12 @@ function buildDeterministicPriceReply(messages) {
 
   if (measurements.length > 0) {
     quantity = measurements.length;
-    totalSquareMeters = measurements.reduce(
-      (sum, measurement) =>
-        sum + calculatePieceSquareMeters(measurement.width, measurement.height),
-      0
-    );
+    totalSquareMeters = measurements.reduce((sum, measurement) => sum + calculatePieceSquareMeters(measurement.width, measurement.height), 0);
   } else {
     const camCount = latestCamCount || findLatestCamCount(messages);
     if (!camCount) {
       return "Yaklaşık fiyat verebilmem için cam adedini veya ölçüleri yazabilir misiniz? 😊";
     }
-
-    // Ölçü yoksa yalnızca ÖN FİYAT: her cam yaklaşık 1 m² kabul edilir.
     quantity = camCount;
     totalSquareMeters = camCount;
     isCamEstimate = true;
@@ -227,13 +188,10 @@ function buildDeterministicPriceReply(messages) {
   const calculatedTotal = totalSquareMeters * unitPrice;
   const roundedAverageTotal = Math.round(calculatedTotal / 10) * 10;
   const serviceLabel = serviceType === "montajli" ? "montajlı" : "demonte";
-  const estimateNote = isCamEstimate
-    ? " Ölçü olmadığı için bu sadece ortalama ön fiyattır."
-    : " Bu yaklaşık fiyattır; net sipariş fiyatı teknik kontrol sonrası belirlenir.";
+  const estimateNote = isCamEstimate ? " Ölçü olmadığı için bu sadece ortalama ön fiyattır." : " Bu yaklaşık fiyattır; net sipariş fiyatı teknik kontrol sonrası belirlenir.";
+  const roadFeeNote = serviceType === "montajli" && quantity < 5 ? "\n\n5 adet altı montajlı işlemlerde mesafeye göre ekstra yol ücreti çıkabilir." : "";
 
-  return `${quantity} adet için ${series} ${serviceLabel} yaklaşık ${formatTry(
-    roundedAverageTotal
-  )} TL civarında tutar 😊${estimateNote}\n\nSipariş detaylarını WhatsApp'ta birlikte tamamlayabiliriz: 0530 028 89 03`;
+  return `${quantity} adet için ${series} ${serviceLabel} yaklaşık ${formatTry(roundedAverageTotal)} TL civarında tutar 😊${estimateNote}${roadFeeNote}\n\nSipariş işlemlerimizi Instagram üzerinden almıyoruz. Sipariş için WhatsApp: 0530 028 89 03`;
 }
 
 module.exports = {
