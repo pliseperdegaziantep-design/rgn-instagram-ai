@@ -38,24 +38,35 @@ function calculatePieceSquareMeters(widthCm, heightCm) {
   const roundedWidth = roundDimensionUpTo10(widthCm);
   const roundedHeight = roundDimensionUpTo10(heightCm);
   const rawSquareMeters = (roundedWidth / 100) * (roundedHeight / 100);
+
+  // KESİN KURAL: minimum 1 m² HER TEK PARÇAYA ayrı uygulanır.
   return rawSquareMeters < 1 ? 1 : rawSquareMeters;
 }
 
 function extractMeasurements(text) {
   const measurements = [];
-  const pattern = /(\d+(?:[.,]\d+)?)\s*(?:cm\s*)?[x×]\s*(\d+(?:[.,]\d+)?)(?:\s*cm)?(?:\s*[-–:]?\s*(\d+)\s*(?:adet|tane))?/gi;
+  const pattern = /(?:(\d+)\s*(?:adet|tane|cam)\s*(?:var\s*)?)?(\d+(?:[.,]\d+)?)\s*(?:cm\s*)?[x×]\s*(\d+(?:[.,]\d+)?)(?:\s*cm)?(?:\s*[-–:]?\s*(\d+)\s*(?:adet|tane|cam))?/gi;
   let match;
 
-  while ((match = pattern.exec(text)) !== null) {
-    const width = normalizeNumber(match[1]);
-    const height = normalizeNumber(match[2]);
-    const quantity = match[3] ? Number(match[3]) : 1;
+  while ((match = pattern.exec(String(text || ""))) !== null) {
+    const quantityBefore = match[1] ? Number(match[1]) : null;
+    const width = normalizeNumber(match[2]);
+    const height = normalizeNumber(match[3]);
+    const quantityAfter = match[4] ? Number(match[4]) : null;
+    const quantity = quantityBefore || quantityAfter || 1;
 
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    if (
+      !Number.isFinite(width) ||
+      !Number.isFinite(height) ||
+      width <= 0 ||
+      height <= 0 ||
+      !Number.isFinite(quantity) ||
+      quantity <= 0
+    ) {
       continue;
     }
 
-    for (let index = 0; index < Math.max(1, quantity); index += 1) {
+    for (let index = 0; index < quantity; index += 1) {
       measurements.push({ width, height });
     }
   }
@@ -69,13 +80,19 @@ function getTranscript(messages) {
     .join("\n");
 }
 
+function getUserMessages(messages) {
+  return messages.filter((message) => message?.role === "user");
+}
+
 function detectLatestSeries(messages) {
   let selectedSeries = null;
 
   for (const message of messages) {
     const content = String(message?.content || "");
     for (const [series, pattern] of SERIES_PATTERNS) {
-      if (pattern.test(content)) selectedSeries = series;
+      if (pattern.test(content)) {
+        selectedSeries = series;
+      }
     }
   }
 
@@ -85,14 +102,28 @@ function detectLatestSeries(messages) {
 function detectServiceType(messages) {
   let serviceType = null;
 
-  for (const message of messages) {
+  // Önce sadece müşterinin açık ifadesini esas al.
+  for (const message of getUserMessages(messages)) {
     const content = String(message?.content || "");
-    if (/montajlı|montajli|montaj dahil/i.test(content)) serviceType = "montajli";
-    if (/montajsız|montajsiz|demonte|kargolu|şehir dışı|sehir disi/i.test(content)) serviceType = "demonte";
+
+    if (/montajlı|montajli|montaj dahil/i.test(content)) {
+      serviceType = "montajli";
+    }
+
+    if (/montajsız|montajsiz|demonte|kargolu|şehir dışı|sehir disi/i.test(content)) {
+      serviceType = "demonte";
+    }
   }
 
   if (serviceType) return serviceType;
-  if (/gaziantep/i.test(getTranscript(messages))) return "montajli";
+
+  // Gaziantep içi konuşmalarda açıkça demonte denmediyse montajlı hizmeti baz al.
+  const userTranscript = getUserMessages(messages)
+    .map((message) => String(message?.content || ""))
+    .join("\n");
+
+  if (/gaziantep/i.test(userTranscript)) return "montajli";
+
   return null;
 }
 
@@ -100,58 +131,70 @@ function isPriceRequest(text) {
   return /fiyat|tutar|kaç tl|kac tl|ne kadar|hesap|ücret|ucret/i.test(text);
 }
 
+function hasPriceContext(messages) {
+  return messages.some((message) => isPriceRequest(String(message?.content || "")));
+}
+
 function isShortFollowUp(text) {
   return /^(tamam|tamam olur|olur|evet|peki|aynen|uygun|hesapla|fiyat ver|söyle|soyle)[.!😊🙂👍\s]*$/i.test(text);
 }
 
-function getLatestUserMeasurementBatch(messages, beforeLatestOnly = false) {
-  const userMessages = messages.filter((message) => message?.role === "user");
-  const endIndex = beforeLatestOnly ? userMessages.length - 2 : userMessages.length - 1;
+function findLatestMeasurementText(messages) {
+  const userMessages = getUserMessages(messages);
 
-  for (let index = endIndex; index >= 0; index -= 1) {
-    const text = String(userMessages[index]?.content || "");
-    const measurements = extractMeasurements(text);
-    if (measurements.length > 0) return measurements;
+  for (let index = userMessages.length - 1; index >= 0; index -= 1) {
+    const content = String(userMessages[index]?.content || "").trim();
+    if (extractMeasurements(content).length > 0) {
+      return content;
+    }
   }
 
-  return [];
+  return "";
 }
 
 function formatTry(value) {
-  return new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat("tr-TR", {
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
 function buildDeterministicPriceReply(messages) {
-  const latestUserMessage = [...messages].reverse().find((message) => message?.role === "user");
+  const latestUserMessage = [...messages]
+    .reverse()
+    .find((message) => message?.role === "user");
+
   const latestText = String(latestUserMessage?.content || "").trim();
   if (!latestText) return null;
 
   const latestMeasurements = extractMeasurements(latestText);
-  let measurements = [];
+  const shouldCalculate =
+    isPriceRequest(latestText) ||
+    latestMeasurements.length > 0 ||
+    (hasPriceContext(messages) && isShortFollowUp(latestText));
 
-  // KESİN KURAL: Yeni ölçü yazılmışsa SADECE o mesajdaki yeni ölçüler hesaplanır.
-  // Eski ölçüler kesinlikle yeni fiyat hesabına eklenmez.
-  if (latestMeasurements.length > 0 && isPriceRequest(latestText)) {
-    measurements = latestMeasurements;
-  } else if (isShortFollowUp(latestText)) {
-    // Yalnızca "tamam/olur/hesapla" gibi kısa devam mesajlarında bir önceki ölçü bloğu kullanılabilir.
-    measurements = getLatestUserMeasurementBatch(messages, true);
-  } else {
-    // "Merhaba fiyat alabilir miyim" gibi ölçüsüz yeni fiyat talebinde eski ölçüleri kullanma.
-    return null;
-  }
+  if (!shouldCalculate) return null;
+
+  // Yeni ölçü geldiyse SADECE o mesajdaki ölçüyü hesapla.
+  // Kısa devam cevabında ise son ölçü mesajını kullan.
+  const measurementText =
+    latestMeasurements.length > 0 ? latestText : findLatestMeasurementText(messages);
+  const measurements = extractMeasurements(measurementText);
 
   if (measurements.length === 0) return null;
 
   const series = detectLatestSeries(messages);
   const serviceType = detectServiceType(messages);
+
   if (!series || !serviceType) return null;
 
   const unitPrice = PRICE_LIST[serviceType]?.[series];
   if (!unitPrice) return null;
 
   const totalSquareMeters = measurements.reduce((sum, measurement) => {
-    return sum + calculatePieceSquareMeters(measurement.width, measurement.height);
+    return (
+      sum +
+      calculatePieceSquareMeters(measurement.width, measurement.height)
+    );
   }, 0);
 
   const exactTotal = totalSquareMeters * unitPrice;
