@@ -38,8 +38,6 @@ function calculatePieceSquareMeters(widthCm, heightCm) {
   const roundedWidth = roundDimensionUpTo10(widthCm);
   const roundedHeight = roundDimensionUpTo10(heightCm);
   const rawSquareMeters = (roundedWidth / 100) * (roundedHeight / 100);
-
-  // KESİN KURAL: minimum 1 m² toplam siparişe değil, HER TEK PARÇAYA uygulanır.
   return rawSquareMeters < 1 ? 1 : rawSquareMeters;
 }
 
@@ -71,22 +69,13 @@ function getTranscript(messages) {
     .join("\n");
 }
 
-function getUserTranscript(messages) {
-  return messages
-    .filter((message) => message?.role === "user")
-    .map((message) => String(message?.content || ""))
-    .join("\n");
-}
-
 function detectLatestSeries(messages) {
   let selectedSeries = null;
 
   for (const message of messages) {
     const content = String(message?.content || "");
     for (const [series, pattern] of SERIES_PATTERNS) {
-      if (pattern.test(content)) {
-        selectedSeries = series;
-      }
+      if (pattern.test(content)) selectedSeries = series;
     }
   }
 
@@ -98,21 +87,12 @@ function detectServiceType(messages) {
 
   for (const message of messages) {
     const content = String(message?.content || "");
-
-    if (/montajlı|montajli|montaj dahil/i.test(content)) {
-      serviceType = "montajli";
-    }
-
-    if (/montajsız|montajsiz|demonte|kargolu|şehir dışı|sehir disi/i.test(content)) {
-      serviceType = "demonte";
-    }
+    if (/montajlı|montajli|montaj dahil/i.test(content)) serviceType = "montajli";
+    if (/montajsız|montajsiz|demonte|kargolu|şehir dışı|sehir disi/i.test(content)) serviceType = "demonte";
   }
 
   if (serviceType) return serviceType;
-
-  const transcript = getTranscript(messages);
-  if (/gaziantep/i.test(transcript)) return "montajli";
-
+  if (/gaziantep/i.test(getTranscript(messages))) return "montajli";
   return null;
 }
 
@@ -120,54 +100,58 @@ function isPriceRequest(text) {
   return /fiyat|tutar|kaç tl|kac tl|ne kadar|hesap|ücret|ucret/i.test(text);
 }
 
-function hasPriceContext(messages) {
-  return messages.some((message) => isPriceRequest(String(message?.content || "")));
-}
-
 function isShortFollowUp(text) {
   return /^(tamam|tamam olur|olur|evet|peki|aynen|uygun|hesapla|fiyat ver|söyle|soyle)[.!😊🙂👍\s]*$/i.test(text);
 }
 
+function getLatestUserMeasurementBatch(messages, beforeLatestOnly = false) {
+  const userMessages = messages.filter((message) => message?.role === "user");
+  const endIndex = beforeLatestOnly ? userMessages.length - 2 : userMessages.length - 1;
+
+  for (let index = endIndex; index >= 0; index -= 1) {
+    const text = String(userMessages[index]?.content || "");
+    const measurements = extractMeasurements(text);
+    if (measurements.length > 0) return measurements;
+  }
+
+  return [];
+}
+
 function formatTry(value) {
-  return new Intl.NumberFormat("tr-TR", {
-    maximumFractionDigits: 0,
-  }).format(value);
+  return new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(value);
 }
 
 function buildDeterministicPriceReply(messages) {
-  const latestUserMessage = [...messages]
-    .reverse()
-    .find((message) => message?.role === "user");
-
+  const latestUserMessage = [...messages].reverse().find((message) => message?.role === "user");
   const latestText = String(latestUserMessage?.content || "").trim();
   if (!latestText) return null;
 
-  // Fiyat talebi önceki mesajda verilmiş ve müşteri "tamam olur" gibi kısa bir
-  // devam cevabı vermiş olsa bile fiyatı AI'ya bırakma; kesin motor hesaplasın.
-  const shouldCalculate =
-    isPriceRequest(latestText) ||
-    (hasPriceContext(messages) && isShortFollowUp(latestText));
+  const latestMeasurements = extractMeasurements(latestText);
+  let measurements = [];
 
-  if (!shouldCalculate) return null;
+  // KESİN KURAL: Yeni ölçü yazılmışsa SADECE o mesajdaki yeni ölçüler hesaplanır.
+  // Eski ölçüler kesinlikle yeni fiyat hesabına eklenmez.
+  if (latestMeasurements.length > 0 && isPriceRequest(latestText)) {
+    measurements = latestMeasurements;
+  } else if (isShortFollowUp(latestText)) {
+    // Yalnızca "tamam/olur/hesapla" gibi kısa devam mesajlarında bir önceki ölçü bloğu kullanılabilir.
+    measurements = getLatestUserMeasurementBatch(messages, true);
+  } else {
+    // "Merhaba fiyat alabilir miyim" gibi ölçüsüz yeni fiyat talebinde eski ölçüleri kullanma.
+    return null;
+  }
 
-  // Ölçüler yalnızca son mesajda olmayabilir. Müşterinin önceki ölçülerini de kullan.
-  const measurements = extractMeasurements(getUserTranscript(messages));
   if (measurements.length === 0) return null;
 
   const series = detectLatestSeries(messages);
   const serviceType = detectServiceType(messages);
-
   if (!series || !serviceType) return null;
 
   const unitPrice = PRICE_LIST[serviceType]?.[series];
   if (!unitPrice) return null;
 
   const totalSquareMeters = measurements.reduce((sum, measurement) => {
-    const pieceSquareMeters = calculatePieceSquareMeters(
-      measurement.width,
-      measurement.height
-    );
-    return sum + pieceSquareMeters;
+    return sum + calculatePieceSquareMeters(measurement.width, measurement.height);
   }, 0);
 
   const exactTotal = totalSquareMeters * unitPrice;
