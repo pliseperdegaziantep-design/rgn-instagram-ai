@@ -13,7 +13,7 @@ const PRICE_LIST = Object.freeze({
     "NANO CLEAN": 640,
     "NANO INSULATION": 740,
     "NANO PRO": 905,
-    HONEYCOMP: 1060,
+    HONEYCOMP: 1100,
   }),
 });
 
@@ -39,7 +39,7 @@ function calculatePieceSquareMeters(widthCm, heightCm) {
   const roundedHeight = roundDimensionUpTo10(heightCm);
   const rawSquareMeters = (roundedWidth / 100) * (roundedHeight / 100);
 
-  // KESİN KURAL: minimum 1 m² HER TEK PARÇAYA ayrı uygulanır.
+  // DEĞİŞMEZ KURAL: minimum 1 m² HER PARÇAYA ayrı uygulanır.
   return rawSquareMeters < 1 ? 1 : rawSquareMeters;
 }
 
@@ -74,14 +74,21 @@ function extractMeasurements(text) {
   return measurements;
 }
 
-function getTranscript(messages) {
-  return messages
-    .map((message) => String(message?.content || ""))
-    .join("\n");
+function extractCamCount(text) {
+  const matches = [...String(text || "").matchAll(/\b(\d+)\s*(?:adet\s*)?(?:cam|kanat)\b/gi)];
+  if (matches.length === 0) return null;
+  const count = Number(matches[matches.length - 1][1]);
+  return Number.isFinite(count) && count > 0 ? count : null;
 }
 
 function getUserMessages(messages) {
   return messages.filter((message) => message?.role === "user");
+}
+
+function getUserTranscript(messages) {
+  return getUserMessages(messages)
+    .map((message) => String(message?.content || ""))
+    .join("\n");
 }
 
 function detectLatestSeries(messages) {
@@ -90,9 +97,7 @@ function detectLatestSeries(messages) {
   for (const message of messages) {
     const content = String(message?.content || "");
     for (const [series, pattern] of SERIES_PATTERNS) {
-      if (pattern.test(content)) {
-        selectedSeries = series;
-      }
+      if (pattern.test(content)) selectedSeries = series;
     }
   }
 
@@ -102,29 +107,14 @@ function detectLatestSeries(messages) {
 function detectServiceType(messages) {
   let serviceType = null;
 
-  // Önce sadece müşterinin açık ifadesini esas al.
   for (const message of getUserMessages(messages)) {
     const content = String(message?.content || "");
 
-    if (/montajlı|montajli|montaj dahil/i.test(content)) {
-      serviceType = "montajli";
-    }
-
-    if (/montajsız|montajsiz|demonte|kargolu|şehir dışı|sehir disi/i.test(content)) {
-      serviceType = "demonte";
-    }
+    if (/montajlı|montajli|montaj dahil/i.test(content)) serviceType = "montajli";
+    if (/montajsız|montajsiz|demonte|kargolu/i.test(content)) serviceType = "demonte";
   }
 
-  if (serviceType) return serviceType;
-
-  // Gaziantep içi konuşmalarda açıkça demonte denmediyse montajlı hizmeti baz al.
-  const userTranscript = getUserMessages(messages)
-    .map((message) => String(message?.content || ""))
-    .join("\n");
-
-  if (/gaziantep/i.test(userTranscript)) return "montajli";
-
-  return null;
+  return serviceType;
 }
 
 function isPriceRequest(text) {
@@ -132,7 +122,9 @@ function isPriceRequest(text) {
 }
 
 function hasPriceContext(messages) {
-  return messages.some((message) => isPriceRequest(String(message?.content || "")));
+  return getUserMessages(messages).some((message) =>
+    isPriceRequest(String(message?.content || ""))
+  );
 }
 
 function isShortFollowUp(text) {
@@ -144,18 +136,25 @@ function findLatestMeasurementText(messages) {
 
   for (let index = userMessages.length - 1; index >= 0; index -= 1) {
     const content = String(userMessages[index]?.content || "").trim();
-    if (extractMeasurements(content).length > 0) {
-      return content;
-    }
+    if (extractMeasurements(content).length > 0) return content;
   }
 
   return "";
 }
 
+function findLatestCamCount(messages) {
+  const userMessages = getUserMessages(messages);
+
+  for (let index = userMessages.length - 1; index >= 0; index -= 1) {
+    const count = extractCamCount(userMessages[index]?.content);
+    if (count) return count;
+  }
+
+  return null;
+}
+
 function formatTry(value) {
-  return new Intl.NumberFormat("tr-TR", {
-    maximumFractionDigits: 0,
-  }).format(value);
+  return new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(value);
 }
 
 function buildDeterministicPriceReply(messages) {
@@ -167,44 +166,74 @@ function buildDeterministicPriceReply(messages) {
   if (!latestText) return null;
 
   const latestMeasurements = extractMeasurements(latestText);
-  const shouldCalculate =
+  const latestCamCount = extractCamCount(latestText);
+  const priceContext = hasPriceContext(messages);
+  const shouldHandlePrice =
     isPriceRequest(latestText) ||
     latestMeasurements.length > 0 ||
-    (hasPriceContext(messages) && isShortFollowUp(latestText));
+    latestCamCount !== null ||
+    (priceContext && isShortFollowUp(latestText));
 
-  if (!shouldCalculate) return null;
+  if (!shouldHandlePrice) return null;
 
-  // Yeni ölçü geldiyse SADECE o mesajdaki ölçüyü hesapla.
-  // Kısa devam cevabında ise son ölçü mesajını kullan.
-  const measurementText =
-    latestMeasurements.length > 0 ? latestText : findLatestMeasurementText(messages);
-  const measurements = extractMeasurements(measurementText);
+  const serviceType = detectServiceType(messages);
+  const userTranscript = getUserTranscript(messages);
 
-  if (measurements.length === 0) return null;
+  // Fiyat hesabında hizmet tipi ASLA tahmin edilmez.
+  if (!serviceType) {
+    return "Tabii 😊 Fiyatı doğru hesaplamam için demonte mi, montajlı mı hizmet istiyorsunuz?\n\nNot: Montajlı hizmetimiz yalnızca Gaziantep içinde geçerlidir.";
+  }
+
+  // Montajlı fiyat yalnızca Gaziantep için verilir.
+  if (serviceType === "montajli" && !/gaziantep/i.test(userTranscript)) {
+    return "Montajlı hizmetimiz yalnızca Gaziantep içinde geçerlidir 😊 Uygulama Gaziantep'te mi?";
+  }
 
   const series = detectLatestSeries(messages);
-  const serviceType = detectServiceType(messages);
-
-  if (!series || !serviceType) return null;
+  if (!series) {
+    return "Fiyatı doğru hesaplamam için hangi kumaş serisini düşündüğünüzü yazar mısınız? 😊 NOVA, Neo Fashion, Nano Clean, Nano Insulation, Nano Pro veya Honeycomp.";
+  }
 
   const unitPrice = PRICE_LIST[serviceType]?.[series];
   if (!unitPrice) return null;
 
-  const totalSquareMeters = measurements.reduce((sum, measurement) => {
-    return (
-      sum +
-      calculatePieceSquareMeters(measurement.width, measurement.height)
+  const measurementText =
+    latestMeasurements.length > 0 ? latestText : findLatestMeasurementText(messages);
+  const measurements = extractMeasurements(measurementText);
+
+  let totalSquareMeters = 0;
+  let quantity = 0;
+  let isCamEstimate = false;
+
+  if (measurements.length > 0) {
+    quantity = measurements.length;
+    totalSquareMeters = measurements.reduce(
+      (sum, measurement) =>
+        sum + calculatePieceSquareMeters(measurement.width, measurement.height),
+      0
     );
-  }, 0);
+  } else {
+    const camCount = latestCamCount || findLatestCamCount(messages);
+    if (!camCount) {
+      return "Yaklaşık fiyat verebilmem için cam adedini veya ölçüleri yazabilir misiniz? 😊";
+    }
 
-  const exactTotal = totalSquareMeters * unitPrice;
-  const roundedTotal = Math.round(exactTotal / 10) * 10;
+    // Ölçü yoksa yalnızca ÖN FİYAT: her cam yaklaşık 1 m² kabul edilir.
+    quantity = camCount;
+    totalSquareMeters = camCount;
+    isCamEstimate = true;
+  }
+
+  const calculatedTotal = totalSquareMeters * unitPrice;
+  const roundedAverageTotal = Math.round(calculatedTotal / 10) * 10;
   const serviceLabel = serviceType === "montajli" ? "montajlı" : "demonte";
-  const quantityLabel = measurements.length > 1 ? `${measurements.length} adet` : "tek adet";
+  const estimateNote = isCamEstimate
+    ? " Ölçü olmadığı için bu sadece ortalama ön fiyattır."
+    : " Bu yaklaşık fiyattır; net sipariş fiyatı teknik kontrol sonrası belirlenir.";
 
-  return `${quantityLabel} için ${series} ${serviceLabel} yaklaşık ${formatTry(
-    roundedTotal
-  )} TL tutar 😊\n\nNet sipariş detaylarını WhatsApp'ta birlikte tamamlayabiliriz: 0530 028 89 03`;
+  return `${quantity} adet için ${series} ${serviceLabel} yaklaşık ${formatTry(
+    roundedAverageTotal
+  )} TL civarında tutar 😊${estimateNote}\n\nSipariş detaylarını WhatsApp'ta birlikte tamamlayabiliriz: 0530 028 89 03`;
 }
 
 module.exports = {
@@ -212,5 +241,6 @@ module.exports = {
   roundDimensionUpTo10,
   calculatePieceSquareMeters,
   extractMeasurements,
+  extractCamCount,
   buildDeterministicPriceReply,
 };
