@@ -17,6 +17,9 @@ const PRICE_LIST = Object.freeze({
   }),
 });
 
+const PRODUCT_URL = "https://pliseperdegaziantep.com/urunler";
+const WHATSAPP_PHONE = "0530 028 89 03";
+
 const SERIES_PATTERNS = [
   ["NANO INSULATION", /nano\s*insulation/i],
   ["NEO FASHION", /neo\s*fashion/i],
@@ -45,35 +48,7 @@ function detectLatest(messages, detectors, roles = ["user"]) {
 }
 
 function detectSeries(messages) {
-  const explicit = detectLatest(messages, SERIES_PATTERNS, ["user"]);
-  if (explicit) return explicit;
-
-  const userText = getUserMessages(messages).map((m) => String(m?.content || "")).join(" ");
-  if (/\b(hepsi|tüm özellik|en iyi|en iyisi|üst segment|kaliteli olsun)\b/i.test(userText)) return "NANO PRO";
-  if (/tam karartma|oda karanlığı|ışık geçirmesin|karartma/i.test(userText)) return "NANO PRO";
-  if (/aşırı güneş|çok güneş|yoğun güneş|yalıtım|yalitim|sıcak|sicak|ısı/i.test(userText)) return "NANO INSULATION";
-  if (/leke|kolay temiz|temizlik|mutfak|çocuk/i.test(userText)) return "NANO CLEAN";
-  if (/desenli|daha kalın|daha kalin|şık|sik|dekoratif/i.test(userText)) return "NEO FASHION";
-  if (/mahremiyet|standart güneş|ekonomik|uygun fiyat/i.test(userText)) return "NOVA";
-
-  return detectLatest(messages, SERIES_PATTERNS, ["assistant"]);
-}
-
-function detectServiceType(messages) {
-  const explicit = detectLatest(messages, [
-    ["montajli", /montajlı|montajli|montaj dahil/i],
-    ["demonte", /montajsız|montajsiz|demonte|kargolu|kargo ile/i],
-  ], ["user"]);
-  if (explicit) return explicit;
-
-  return detectLatest(messages, [
-    ["montajli", /montajlı hizmet|montaj dahil/i],
-    ["demonte", /demonte gönderim|demonte\/kargolu|kargolu gönderim/i],
-  ], ["assistant"]);
-}
-
-function detectGaziantep(messages) {
-  return getUserMessages(messages).some((message) => /gaziantep/i.test(String(message?.content || "")));
+  return detectLatest(messages, SERIES_PATTERNS, ["user"]);
 }
 
 function isPriceRequest(text) {
@@ -84,8 +59,12 @@ function isFabricListRequest(text) {
   return /kumaş\s*(?:çeşit|cesit|seri|model)|hangi\s*kumaş|hangi\s*seri|serileriniz|kumaşlarınız|kumaslariniz|ürün\s*çeşit/i.test(String(text || ""));
 }
 
+function isOrderIntent(text) {
+  return /sipariş\s*(?:ver|oluştur|oluşturalım|oluşturalim)|almak\s*istiyorum|satın\s*almak|satin\s*almak|tamam\s*alayım|tamam\s*alayim|siparişimi/i.test(String(text || ""));
+}
+
 function buildFabricListReply() {
-  return "Tabii 😊 Kumaş serilerimiz:\nNOVA 485 TL – ekonomik, mahremiyet ve güneş\nNEO FASHION 545 TL – desenli ve daha kalın\nNANO CLEAN 545 TL – leke tutmaz, kolay temizlenir\nNANO INSULATION 645 TL – aşırı güneş ve ısı yalıtımı\nNANO PRO 845 TL – üst segment; VR01-02 güçlü güneş kontrolü, VR03-04 tam karartma\nHONEYCOMP 1.000 TL – petek yapılı premium seri\n\nFiyatlar demonte birim fiyatlarımızdır. Tüm kumaşlarımız yıkanabilir ve 2 yıl garantilidir 😊";
+  return "Tabii 😊 Kumaş serilerimiz:\nNOVA 485 TL – ekonomik, mahremiyet ve güneş\nNEO FASHION 545 TL – desenli ve daha kalın\nNANO CLEAN 545 TL – leke tutmaz, kolay temizlenir\nNANO INSULATION 645 TL – aşırı güneş ve ısı yalıtımı\nNANO PRO 845 TL – üst segment; VR01-02 güçlü güneş kontrolü, VR03-04 tam karartma\nHONEYCOMP 1.000 TL – petek yapılı premium seri\n\nTüm kumaşlarımız yıkanabilir ve 2 yıl garantilidir 😊";
 }
 
 function extractCamCount(text) {
@@ -131,8 +110,9 @@ function avoidRepeatedReply(messages, reply) {
     if (message?.role !== "assistant") return false;
     return String(message?.content || "").replace(/\s+/g, " ").trim().toLocaleLowerCase("tr-TR") === normalized;
   });
+
   return repeated
-    ? "Size aynı cevabı tekrar vermeyeyim 😊 Burada takılmayalım; WhatsApp'tan hemen yardımcı olalım: 0530 028 89 03"
+    ? `Burada sizi tekrar bekletmeyeyim 😊 WhatsApp'tan hemen devam edebiliriz: ${WHATSAPP_PHONE}`
     : reply;
 }
 
@@ -140,6 +120,10 @@ function buildDeterministicPriceReply(messages) {
   const latestUserMessage = [...messages].reverse().find((message) => message?.role === "user");
   const latestText = String(latestUserMessage?.content || "").trim();
   if (!latestText) return null;
+
+  if (isOrderIntent(latestText)) {
+    return `Memnuniyetle 😊 Sipariş işlemlerimizi WhatsApp üzerinden oluşturuyoruz: ${WHATSAPP_PHONE}`;
+  }
 
   if (isFabricListRequest(latestText)) {
     return avoidRepeatedReply(messages, buildFabricListReply());
@@ -149,27 +133,22 @@ function buildDeterministicPriceReply(messages) {
   if (!priceContext) return null;
 
   const camCount = findLatestCamCount(messages);
-  const series = detectSeries(messages);
-  const serviceType = detectServiceType(messages);
 
-  let reply;
-  if (!camCount) reply = "Tabii 😊 Kaç adet camınız var?";
-  else if (!series) reply = "Cam adedini aldım 😊 Daha çok mahremiyet, güneş, ısı, kolay temizlik ya da karartma için mi düşünüyorsunuz?";
-  else if (!serviceType) reply = "Demonte/kargolu mu, Gaziantep içi montajlı mı düşünüyorsunuz? 😊";
-  else if (serviceType === "montajli" && !detectGaziantep(messages)) reply = "Montajlı hizmetimiz yalnızca Gaziantep içinde 😊 Uygulama Gaziantep'te mi?";
-  else {
-    const unitPrice = PRICE_LIST[serviceType]?.[series];
-    if (!unitPrice) return null;
-    const averageTotal = roundFriendlyAverage(camCount * unitPrice);
-    const serviceLabel = serviceType === "montajli" ? "montaj dahil" : "demonte";
-
-    if (serviceType === "montajli") {
-      const roadFeeNote = camCount < 5 ? " 5 adet altı montajlarda mesafeye göre ekstra yol ücreti çıkabilir." : "";
-      reply = `${camCount} cam için ${series} ${serviceLabel} ortalama ${formatMoney(averageTotal)} TL tutar 😊 Fiyat cam balkon tipi ve ölçülere göre değişebilir.${roadFeeNote}\n\nNet fiyat montaj ekibimizin ölçüsü sonrası belli olur.`;
-    } else {
-      reply = `${camCount} cam için ${series} demonte ortalama ${formatMoney(averageTotal)} TL tutar 😊 Fiyat cam balkon tipi ve ölçülere göre değişebilir.\n\nNet fiyat için ölçülerinizi WhatsApp'tan gönderebilirsiniz: 0530 028 89 03`;
-    }
+  if (!camCount) {
+    return avoidRepeatedReply(
+      messages,
+      "Merhaba 😊 Kaç adet camınız var? Hangi şehirden ulaşıyorsunuz?"
+    );
   }
+
+  // İlk hızlı ortalama teklif daima ekonomik başlangıç serisi NOVA üzerinden verilir.
+  // Müşteri açıkça başka bir seri seçmişse o serinin demonte birim fiyatı kullanılır.
+  const series = detectSeries(messages) || "NOVA";
+  const unitPrice = PRICE_LIST.demonte[series];
+  if (!unitPrice) return null;
+
+  const averageTotal = roundFriendlyAverage(camCount * unitPrice);
+  const reply = `${camCount} cam için ${series} serisi ortalama ${formatMoney(averageTotal)} TL civarında tutar 😊 Fiyat cam tipi ve ölçülere göre değişebilir.\n\nÜrünlerimizi inceleyebilirsiniz:\n${PRODUCT_URL}`;
 
   return avoidRepeatedReply(messages, reply);
 }
