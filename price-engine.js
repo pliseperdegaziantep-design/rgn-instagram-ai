@@ -61,8 +61,6 @@ function pushMeasurementCopies(measurements, width, height, quantity) {
 function extractMeasurements(text) {
   const source = String(text || "");
   const measurements = [];
-
-  // 3 adet 55x145 / 55x145 3 adet / 55 × 145
   const xPattern = /(?:(\d+)\s*(?:adet|tane|cam)\s*(?:var\s*)?)?(\d+(?:[.,]\d+)?)\s*(?:cm\s*)?[x×]\s*(\d+(?:[.,]\d+)?)(?:\s*cm)?(?:\s*[-–:]?\s*(\d+)\s*(?:adet|tane|cam))?/gi;
   let match;
 
@@ -73,9 +71,6 @@ function extractMeasurements(text) {
     pushMeasurementCopies(measurements, width, height, quantity);
   }
 
-  // Müşterilerin sık kullandığı doğal yazım:
-  // "3 adet 55.5cm en 144.5 boy"
-  // "7 adet 61,5 cm en. 144,5 boy"
   const enBoyPattern = /(?:(\d+)\s*(?:adet|tane|cam)\s*)?(\d+(?:[.,]\d+)?)\s*(?:cm\s*)?en\.?\s*[,;:\-]?\s*(\d+(?:[.,]\d+)?)\s*(?:cm\s*)?boy\.?/gi;
 
   while ((match = enBoyPattern.exec(source)) !== null) {
@@ -99,10 +94,14 @@ function getUserMessages(messages) {
   return messages.filter((message) => message?.role === "user");
 }
 
-function getUserTranscript(messages) {
-  return getUserMessages(messages)
-    .map((message) => String(message?.content || ""))
-    .join("\n");
+function isPriceRequest(text) {
+  return /fiyat|tutar|kaç tl|kac tl|ne kadar|hesap|ücret|ucret|maliyet/i.test(text);
+}
+
+function hasPriceContext(messages) {
+  return getUserMessages(messages).some((message) =>
+    isPriceRequest(String(message?.content || ""))
+  );
 }
 
 function detectLatestSeries(messages) {
@@ -118,56 +117,8 @@ function detectLatestSeries(messages) {
   return selectedSeries;
 }
 
-function detectServiceType(messages) {
-  let serviceType = null;
-
-  for (const message of getUserMessages(messages)) {
-    const content = String(message?.content || "");
-    if (/montajlı|montajli|montaj dahil/i.test(content)) serviceType = "montajli";
-    if (/montajsız|montajsiz|demonte|kargolu/i.test(content)) serviceType = "demonte";
-  }
-
-  return serviceType;
-}
-
-function isPriceRequest(text) {
-  return /fiyat|tutar|kaç tl|kac tl|ne kadar|hesap|ücret|ucret/i.test(text);
-}
-
-function hasPriceContext(messages) {
-  return getUserMessages(messages).some((message) =>
-    isPriceRequest(String(message?.content || ""))
-  );
-}
-
 function isShortFollowUp(text) {
   return /^(tamam|tamam olur|olur|evet|peki|aynen|uygun|hesapla|fiyat ver|söyle|soyle)[.!😊🙂👍\s]*$/i.test(text);
-}
-
-function findLatestMeasurementText(messages) {
-  const userMessages = getUserMessages(messages);
-
-  for (let index = userMessages.length - 1; index >= 0; index -= 1) {
-    const content = String(userMessages[index]?.content || "").trim();
-    if (extractMeasurements(content).length > 0) return content;
-  }
-
-  return "";
-}
-
-function findLatestCamCount(messages) {
-  const userMessages = getUserMessages(messages);
-
-  for (let index = userMessages.length - 1; index >= 0; index -= 1) {
-    const count = extractCamCount(userMessages[index]?.content);
-    if (count) return count;
-  }
-
-  return null;
-}
-
-function formatTry(value) {
-  return new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(value);
 }
 
 function buildDeterministicPriceReply(messages) {
@@ -178,74 +129,23 @@ function buildDeterministicPriceReply(messages) {
   const latestText = String(latestUserMessage?.content || "").trim();
   if (!latestText) return null;
 
-  const latestMeasurements = extractMeasurements(latestText);
-  const latestCamCount = extractCamCount(latestText);
+  const measurements = extractMeasurements(latestText);
+  const camCount = extractCamCount(latestText);
   const priceContext = hasPriceContext(messages);
-  const shouldHandlePrice =
+
+  const shouldRoutePricing =
     isPriceRequest(latestText) ||
-    latestMeasurements.length > 0 ||
-    latestCamCount !== null ||
-    (priceContext && isShortFollowUp(latestText));
+    (priceContext && (measurements.length > 0 || camCount !== null || isShortFollowUp(latestText)));
 
-  if (!shouldHandlePrice) return null;
+  if (!shouldRoutePricing) return null;
 
-  const serviceType = detectServiceType(messages);
-  const userTranscript = getUserTranscript(messages);
+  const series = detectLatestSeries(messages);
 
-  if (!serviceType) {
-    return "Tabii 😊 Fiyatı doğru hesaplamam için demonte mi, montajlı mı hizmet istiyorsunuz?";
+  if (series) {
+    return `${series} serisi için net fiyatınızı ölçünüze göre WhatsApp'tan hızlıca hazırlıyoruz 😊\n\n0530 028 89 03`;
   }
 
-  if (serviceType === "montajli" && !/gaziantep/i.test(userTranscript)) {
-    return "Montajlı hizmetimiz yalnızca Gaziantep içinde 😊 Uygulama Gaziantep'te mi?";
-  }
-
-  // Özel bir seri konuşulmadıysa müşteriyi bekletme. Ekonomik başlangıç serisi NOVA üzerinden ön fiyat ver.
-  const series = detectLatestSeries(messages) || "NOVA";
-  const unitPrice = PRICE_LIST[serviceType]?.[series];
-  if (!unitPrice) return null;
-
-  const measurementText =
-    latestMeasurements.length > 0 ? latestText : findLatestMeasurementText(messages);
-  const measurements = extractMeasurements(measurementText);
-
-  let totalSquareMeters = 0;
-  let quantity = 0;
-  let isCamEstimate = false;
-
-  if (measurements.length > 0) {
-    quantity = measurements.length;
-    totalSquareMeters = measurements.reduce(
-      (sum, measurement) =>
-        sum + calculatePieceSquareMeters(measurement.width, measurement.height),
-      0
-    );
-  } else {
-    const camCount = latestCamCount || findLatestCamCount(messages);
-    if (!camCount) {
-      return "Yaklaşık fiyat verebilmem için cam adedini veya ölçüleri yazabilir misiniz? 😊";
-    }
-
-    quantity = camCount;
-    totalSquareMeters = camCount;
-    isCamEstimate = true;
-  }
-
-  const calculatedTotal = totalSquareMeters * unitPrice;
-  // Müşteriye verilen yaklaşık fiyatı en yakın 100 TL'ye yuvarla. Örn: 960 TL → 1.000 TL.
-  const roundedAverageTotal = Math.round(calculatedTotal / 100) * 100;
-  const serviceLabel = serviceType === "montajli" ? "montajlı" : "demonte";
-  const estimateNote = isCamEstimate
-    ? " Ölçü olmadığı için bu ortalama ön fiyattır."
-    : " Ölçülerinize göre yaklaşık fiyattır.";
-  const roadFeeNote =
-    serviceType === "montajli" && quantity < 5
-      ? "\n5 adet altı montajlı işlemlerde mesafeye göre ekstra yol ücreti çıkabilir."
-      : "";
-
-  return `${quantity} adet için ${series} ${serviceLabel} yaklaşık ${formatTry(
-    roundedAverageTotal
-  )} TL civarında tutar 😊${estimateNote}${roadFeeNote}\n\nSipariş için WhatsApp: 0530 028 89 03`;
+  return "Tabii 😊 Ekonomik ve günlük kullanım için Nova serimiz güzel bir başlangıç seçeneği. Net fiyatınızı ölçünüze göre WhatsApp'tan hızlıca hazırlıyoruz:\n\n0530 028 89 03";
 }
 
 module.exports = {
