@@ -94,6 +94,14 @@ function isOrderIntent(text) {
   return /sipariş\s*(?:ver|oluştur|oluşturalım|oluşturalim)|almak\s*istiyorum|satın\s*almak|satin\s*almak|tamam\s*alayım|tamam\s*alayim|siparişimi/i.test(String(text || ""));
 }
 
+function isMeasurementRequest(text) {
+  return /ölçü\s*(?:alabilir|alır|alir|aldır|aldir|almak|aldırmak)|ölçüye\s*gel|keşif|kesif/i.test(String(text || ""));
+}
+
+function isMontageServiceRequest(text) {
+  return /montaj\s*(?:hizmeti\s*)?(?:istiyorum|isterim|istiyoruz|yaptırmak|yaptirmak)|montaj\s*yapar\s*mısınız|montaj\s*yapiyor\s*musunuz/i.test(String(text || ""));
+}
+
 function isMontagePriceQuestion(text) {
   return /montajlı\s*fiyat|montajli\s*fiyat|bunlar\s*montajlı|bunlar\s*montajli|montaj\s*dahil/i.test(String(text || ""));
 }
@@ -163,8 +171,17 @@ function buildDeterministicPriceReply(messages) {
   const previousAssistantText = getPreviousAssistantText(messages);
   if (!latestText) return null;
 
+  // Niyet tabanlı cevaplar fiyat akışından önce değerlendirilir.
   if (isOrderIntent(latestText)) {
     return `Sipariş için WhatsApp: ${WHATSAPP_PHONE}`;
+  }
+
+  if (isMeasurementRequest(latestText)) {
+    return `Tabii 😊 Ölçü için konumunuzu WhatsApp'tan iletebilirsiniz: ${WHATSAPP_PHONE}`;
+  }
+
+  if (isMontageServiceRequest(latestText)) {
+    return `Tabii 😊 Montaj hizmetimiz Gaziantep içinde. Konumunuzu WhatsApp'tan iletebilirsiniz: ${WHATSAPP_PHONE}`;
   }
 
   if (isFabricListRequest(latestText)) {
@@ -184,17 +201,14 @@ function buildDeterministicPriceReply(messages) {
   const selectedSeries = detectSeries(messages);
   const serviceType = detectServiceType(messages);
 
-  // Yeni fiyat talebi: önce şehir ve cam adedi.
   if (isPriceRequest(latestText) && !camCount) {
     return "Merhaba 😊 Kaç adet camınız var? Hangi şehirden ulaşıyorsunuz?";
   }
 
-  // Cam adedi geldi: önce ürünleri incelet, seri seçtir. Fiyatı hemen dayatma.
   if (latestCamCount && !selectedSeries) {
-    return `Teşekkür ederim 😊 Serilerimizi buradan inceleyebilirsiniz:\n${PRODUCT_URL}\nBeğendiğiniz seriyi yazmanız yeterli.`;
+    return `Serilerimizi buradan inceleyebilirsiniz 😊\n${PRODUCT_URL}\nBeğendiğiniz seriyi yazmanız yeterli.`;
   }
 
-  // Kullanıcı seri seçtiyse ortalama fiyat aşamasına geç.
   if (selectedSeries && camCount) {
     if (!serviceType) {
       if (!isGaziantepConversation(messages)) {
@@ -210,7 +224,6 @@ function buildDeterministicPriceReply(messages) {
     return buildQuote(camCount, selectedSeries, serviceType);
   }
 
-  // Sadece şehir/cam bilgisi akışı devam ediyorsa ürün linkine yönlendir.
   if (/kaç adet camınız var|hangi şehirden ulaşıyorsunuz/i.test(previousAssistantText) && camCount) {
     return `Serilerimizi buradan inceleyebilirsiniz 😊\n${PRODUCT_URL}\nBeğendiğiniz seriyi yazmanız yeterli.`;
   }
