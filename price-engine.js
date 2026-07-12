@@ -29,10 +29,28 @@ const SERIES_PATTERNS = [
   ["NOVA", /\bnova\b/i],
 ];
 
-const NUMBER_WORDS = Object.freeze({ bir:1, iki:2, üç:3, uc:3, dört:4, dort:4, beş:5, bes:5, altı:6, alti:6, yedi:7, sekiz:8, dokuz:9, on:10, onbir:11, "on bir":11, oniki:12, "on iki":12, onüç:13, "on üç":13, ondört:14, "on dört":14, onbeş:15, "on beş":15, onaltı:16, "on altı":16, onyedi:17, "on yedi":17, onsekiz:18, "on sekiz":18, ondokuz:19, "on dokuz":19, yirmi:20 });
+const NUMBER_WORDS = Object.freeze({
+  bir: 1, iki: 2, üç: 3, uc: 3, dört: 4, dort: 4, beş: 5, bes: 5,
+  altı: 6, alti: 6, yedi: 7, sekiz: 8, dokuz: 9, on: 10,
+  onbir: 11, "on bir": 11, oniki: 12, "on iki": 12,
+  onüç: 13, "on üç": 13, ondört: 14, "on dört": 14,
+  onbeş: 15, "on beş": 15, onaltı: 16, "on altı": 16,
+  onyedi: 17, "on yedi": 17, onsekiz: 18, "on sekiz": 18,
+  ondokuz: 19, "on dokuz": 19, yirmi: 20,
+});
 
 function getUserMessages(messages) {
   return messages.filter((message) => message?.role === "user");
+}
+
+function getLatestUserText(messages) {
+  const message = [...messages].reverse().find((item) => item?.role === "user");
+  return String(message?.content || "").trim();
+}
+
+function getPreviousAssistantText(messages) {
+  const message = [...messages].reverse().find((item) => item?.role === "assistant");
+  return String(message?.content || "").trim();
 }
 
 function detectLatest(messages, detectors, roles = ["user"]) {
@@ -51,8 +69,21 @@ function detectSeries(messages) {
   return detectLatest(messages, SERIES_PATTERNS, ["user"]);
 }
 
+function detectServiceType(messages) {
+  return detectLatest(messages, [
+    ["montajli", /montajlı|montajli|montaj dahil/i],
+    ["demonte", /demonte|montajsız|montajsiz|kargolu|kargo ile/i],
+  ], ["user"]);
+}
+
+function isGaziantepConversation(messages) {
+  return getUserMessages(messages).some((message) =>
+    /gaziantep|şahinbey|sahinbey|şehitkamil|sehitkamil/i.test(String(message?.content || ""))
+  );
+}
+
 function isPriceRequest(text) {
-  return /fiyat|tutar|kaç tl|kac tl|ne kadar|hesap|ücret|ucret|maliyet|ortalama/i.test(String(text || ""));
+  return /fiyat|tutar|kaç tl|kac tl|ne kadar|ücret|ucret|maliyet|ortalama/i.test(String(text || ""));
 }
 
 function isFabricListRequest(text) {
@@ -63,25 +94,22 @@ function isOrderIntent(text) {
   return /sipariş\s*(?:ver|oluştur|oluşturalım|oluşturalim)|almak\s*istiyorum|satın\s*almak|satin\s*almak|tamam\s*alayım|tamam\s*alayim|siparişimi/i.test(String(text || ""));
 }
 
-function isMontajPriceConfirmation(text) {
-  return /(?:bunlar|bu|verdiğiniz|verdiginiz)?\s*montajlı\s*fiyat\s*m[ıi]|fiyatlar\s*montajlı\s*m[ıi]|montaj\s*dahil\s*m[ıi]/i.test(String(text || ""));
+function isMontagePriceQuestion(text) {
+  return /montajlı\s*fiyat|montajli\s*fiyat|bunlar\s*montajlı|bunlar\s*montajli|montaj\s*dahil/i.test(String(text || ""));
 }
 
-function isMontajPriceListRequest(text) {
-  return /montajlı\s*fiyat(?:lar|ları|lari)?(?:ınız|iniz)?\s*(?:ne|nedir|neler|kaç|kac)|montajlı\s*fiyat(?:lar|ları|lari)?(?:ınızı|inizi)?\s*(?:yazar|söyler|soyler|verir)/i.test(String(text || ""));
+function isDemontePriceQuestion(text) {
+  return /demonte\s*fiyat|montajsız\s*fiyat|montajsiz\s*fiyat|kargolu\s*fiyat/i.test(String(text || ""));
 }
 
 function buildFabricListReply() {
   return "NOVA 485 TL – ekonomik\nNEO FASHION 545 TL – desenli\nNANO CLEAN 545 TL – kolay temizlenir\nNANO INSULATION 645 TL – yalıtımlı\nNANO PRO 845 TL – güçlü güneş kontrolü / karartma\nHONEYCOMP 1.000 TL – premium\n\nTüm kumaşlarımız yıkanabilir ve 2 yıl garantilidir 😊";
 }
 
-function buildMontajPriceListReply() {
-  return "Montajlı fiyatlarımız 😊\nNOVA 580 TL\nNEO FASHION 640 TL\nNANO CLEAN 640 TL\nNANO INSULATION 740 TL\nNANO PRO 905 TL\nHONEYCOMP 1.060 TL";
-}
-
 function extractCamCount(text) {
   const source = String(text || "").toLocaleLowerCase("tr-TR").trim();
   const numericMatches = [...source.matchAll(/\b(\d+)\s*(?:adet\s*)?(?:cam|kanat|parça|perde)?\b/gi)];
+
   for (let index = numericMatches.length - 1; index >= 0; index -= 1) {
     const value = Number(numericMatches[index][1]);
     if (Number.isFinite(value) && value > 0 && value <= 500) return value;
@@ -93,6 +121,7 @@ function extractCamCount(text) {
     const pattern = new RegExp(`(?:^|\\s)${escaped}(?:\\s+(?:adet|cam|kanat|parça|perde))?(?:$|\\s)`, "i");
     if (pattern.test(source)) return value;
   }
+
   return null;
 }
 
@@ -116,58 +145,77 @@ function roundFriendlyAverage(total) {
   return Math.round(total / 100) * 100;
 }
 
-function avoidRepeatedReply(messages, reply) {
-  const normalized = String(reply || "").replace(/\s+/g, " ").trim().toLocaleLowerCase("tr-TR");
-  const repeated = messages.some((message) => {
-    if (message?.role !== "assistant") return false;
-    return String(message?.content || "").replace(/\s+/g, " ").trim().toLocaleLowerCase("tr-TR") === normalized;
-  });
+function buildQuote(camCount, series, serviceType) {
+  const unitPrice = PRICE_LIST[serviceType]?.[series];
+  if (!unitPrice) return null;
 
-  return repeated ? `Detaylı bilgi için WhatsApp: ${WHATSAPP_PHONE}` : reply;
+  const total = roundFriendlyAverage(camCount * unitPrice);
+  const serviceLabel = serviceType === "montajli" ? "montaj dahil" : "demonte";
+  const suffix = serviceType === "montajli"
+    ? "Net fiyat ölçü sonrası belli olur."
+    : "Net fiyat ölçülere göre belli olur.";
+
+  return `${camCount} cam için ${series} ${serviceLabel} ortalama ${formatMoney(total)} TL tutar 😊 ${suffix}`;
 }
 
 function buildDeterministicPriceReply(messages) {
-  const latestUserMessage = [...messages].reverse().find((message) => message?.role === "user");
-  const latestText = String(latestUserMessage?.content || "").trim();
+  const latestText = getLatestUserText(messages);
+  const previousAssistantText = getPreviousAssistantText(messages);
   if (!latestText) return null;
 
-  if (isOrderIntent(latestText)) return `Sipariş için WhatsApp: ${WHATSAPP_PHONE}`;
+  if (isOrderIntent(latestText)) {
+    return `Sipariş için WhatsApp: ${WHATSAPP_PHONE}`;
+  }
 
   if (isFabricListRequest(latestText)) {
-    return avoidRepeatedReply(messages, buildFabricListReply());
+    return buildFabricListReply();
   }
 
-  // Doğrudan sorulan montaj sorusuna doğrudan cevap ver; eski fiyat konuşmasını yeniden çalıştırma.
-  if (isMontajPriceConfirmation(latestText)) {
-    return "Hayır 😊 Bunlar demonte fiyatlarımızdır. Montajlı fiyatlar farklıdır.";
+  if (isMontagePriceQuestion(latestText)) {
+    return "Montajlı fiyatlarımız farklıdır 😊 Gaziantep içi montaj hizmeti veriyoruz.";
   }
 
-  if (isMontajPriceListRequest(latestText)) {
-    return buildMontajPriceListReply();
+  if (isDemontePriceQuestion(latestText)) {
+    return "Evet 😊 Bunlar demonte fiyatlarımızdır.";
   }
 
   const latestCamCount = extractCamCount(latestText);
-  const latestIsPriceRequest = isPriceRequest(latestText);
-  const earlierPriceContext = getUserMessages(messages)
-    .slice(0, -1)
-    .some((message) => isPriceRequest(message?.content));
-
-  // Fiyat motoru yalnızca güncel mesaj gerçekten fiyat istiyorsa veya fiyat sorusuna cam adediyle cevap verildiyse çalışır.
-  if (!latestIsPriceRequest && !(latestCamCount && earlierPriceContext)) return null;
-
   const camCount = latestCamCount || findLatestCamCount(messages);
-  if (!camCount) {
-    return avoidRepeatedReply(messages, "Merhaba 😊 Kaç adet camınız var? Hangi şehirden ulaşıyorsunuz?");
+  const selectedSeries = detectSeries(messages);
+  const serviceType = detectServiceType(messages);
+
+  // Yeni fiyat talebi: önce şehir ve cam adedi.
+  if (isPriceRequest(latestText) && !camCount) {
+    return "Merhaba 😊 Kaç adet camınız var? Hangi şehirden ulaşıyorsunuz?";
   }
 
-  const series = detectSeries(messages) || "NOVA";
-  const unitPrice = PRICE_LIST.demonte[series];
-  if (!unitPrice) return null;
+  // Cam adedi geldi: önce ürünleri incelet, seri seçtir. Fiyatı hemen dayatma.
+  if (latestCamCount && !selectedSeries) {
+    return `Teşekkür ederim 😊 Serilerimizi buradan inceleyebilirsiniz:\n${PRODUCT_URL}\nBeğendiğiniz seriyi yazmanız yeterli.`;
+  }
 
-  const averageTotal = roundFriendlyAverage(camCount * unitPrice);
-  const reply = `${camCount} cam için ${series} ortalama ${formatMoney(averageTotal)} TL civarında tutar 😊 Fiyat ölçülere göre değişebilir.\n${PRODUCT_URL}`;
+  // Kullanıcı seri seçtiyse ortalama fiyat aşamasına geç.
+  if (selectedSeries && camCount) {
+    if (!serviceType) {
+      if (!isGaziantepConversation(messages)) {
+        return buildQuote(camCount, selectedSeries, "demonte");
+      }
+      return "Montajlı mı, demonte mi düşünüyorsunuz? 😊";
+    }
 
-  return avoidRepeatedReply(messages, reply);
+    if (serviceType === "montajli" && !isGaziantepConversation(messages)) {
+      return "Montaj hizmetimiz Gaziantep içinde 😊 Şehir dışına demonte gönderim yapıyoruz.";
+    }
+
+    return buildQuote(camCount, selectedSeries, serviceType);
+  }
+
+  // Sadece şehir/cam bilgisi akışı devam ediyorsa ürün linkine yönlendir.
+  if (/kaç adet camınız var|hangi şehirden ulaşıyorsunuz/i.test(previousAssistantText) && camCount) {
+    return `Serilerimizi buradan inceleyebilirsiniz 😊\n${PRODUCT_URL}\nBeğendiğiniz seriyi yazmanız yeterli.`;
+  }
+
+  return null;
 }
 
 module.exports = {
