@@ -63,8 +63,20 @@ function isOrderIntent(text) {
   return /sipariş\s*(?:ver|oluştur|oluşturalım|oluşturalim)|almak\s*istiyorum|satın\s*almak|satin\s*almak|tamam\s*alayım|tamam\s*alayim|siparişimi/i.test(String(text || ""));
 }
 
+function isMontajPriceConfirmation(text) {
+  return /(?:bunlar|bu|verdiğiniz|verdiginiz)?\s*montajlı\s*fiyat\s*m[ıi]|fiyatlar\s*montajlı\s*m[ıi]|montaj\s*dahil\s*m[ıi]/i.test(String(text || ""));
+}
+
+function isMontajPriceListRequest(text) {
+  return /montajlı\s*fiyat(?:lar|ları|lari)?(?:ınız|iniz)?\s*(?:ne|nedir|neler|kaç|kac)|montajlı\s*fiyat(?:lar|ları|lari)?(?:ınızı|inizi)?\s*(?:yazar|söyler|soyler|verir)/i.test(String(text || ""));
+}
+
 function buildFabricListReply() {
   return "NOVA 485 TL – ekonomik\nNEO FASHION 545 TL – desenli\nNANO CLEAN 545 TL – kolay temizlenir\nNANO INSULATION 645 TL – yalıtımlı\nNANO PRO 845 TL – güçlü güneş kontrolü / karartma\nHONEYCOMP 1.000 TL – premium\n\nTüm kumaşlarımız yıkanabilir ve 2 yıl garantilidir 😊";
+}
+
+function buildMontajPriceListReply() {
+  return "Montajlı fiyatlarımız 😊\nNOVA 580 TL\nNEO FASHION 640 TL\nNANO CLEAN 640 TL\nNANO INSULATION 740 TL\nNANO PRO 905 TL\nHONEYCOMP 1.060 TL";
 }
 
 function extractCamCount(text) {
@@ -111,9 +123,7 @@ function avoidRepeatedReply(messages, reply) {
     return String(message?.content || "").replace(/\s+/g, " ").trim().toLocaleLowerCase("tr-TR") === normalized;
   });
 
-  return repeated
-    ? `Detaylı bilgi için WhatsApp: ${WHATSAPP_PHONE}`
-    : reply;
+  return repeated ? `Detaylı bilgi için WhatsApp: ${WHATSAPP_PHONE}` : reply;
 }
 
 function buildDeterministicPriceReply(messages) {
@@ -121,24 +131,33 @@ function buildDeterministicPriceReply(messages) {
   const latestText = String(latestUserMessage?.content || "").trim();
   if (!latestText) return null;
 
-  if (isOrderIntent(latestText)) {
-    return `Sipariş için WhatsApp: ${WHATSAPP_PHONE}`;
-  }
+  if (isOrderIntent(latestText)) return `Sipariş için WhatsApp: ${WHATSAPP_PHONE}`;
 
   if (isFabricListRequest(latestText)) {
     return avoidRepeatedReply(messages, buildFabricListReply());
   }
 
-  const priceContext = getUserMessages(messages).some((message) => isPriceRequest(message?.content));
-  if (!priceContext) return null;
+  // Doğrudan sorulan montaj sorusuna doğrudan cevap ver; eski fiyat konuşmasını yeniden çalıştırma.
+  if (isMontajPriceConfirmation(latestText)) {
+    return "Hayır 😊 Bunlar demonte fiyatlarımızdır. Montajlı fiyatlar farklıdır.";
+  }
 
-  const camCount = findLatestCamCount(messages);
+  if (isMontajPriceListRequest(latestText)) {
+    return buildMontajPriceListReply();
+  }
 
+  const latestCamCount = extractCamCount(latestText);
+  const latestIsPriceRequest = isPriceRequest(latestText);
+  const earlierPriceContext = getUserMessages(messages)
+    .slice(0, -1)
+    .some((message) => isPriceRequest(message?.content));
+
+  // Fiyat motoru yalnızca güncel mesaj gerçekten fiyat istiyorsa veya fiyat sorusuna cam adediyle cevap verildiyse çalışır.
+  if (!latestIsPriceRequest && !(latestCamCount && earlierPriceContext)) return null;
+
+  const camCount = latestCamCount || findLatestCamCount(messages);
   if (!camCount) {
-    return avoidRepeatedReply(
-      messages,
-      "Merhaba 😊 Kaç adet camınız var? Hangi şehirden ulaşıyorsunuz?"
-    );
+    return avoidRepeatedReply(messages, "Merhaba 😊 Kaç adet camınız var? Hangi şehirden ulaşıyorsunuz?");
   }
 
   const series = detectSeries(messages) || "NOVA";
