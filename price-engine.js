@@ -45,11 +45,9 @@ function detectLatest(messages, detectors, roles = ["user"]) {
 }
 
 function detectSeries(messages) {
-  // Önce müşteri tarafından açıkça söylenen seriyi kullan.
   const explicit = detectLatest(messages, SERIES_PATTERNS, ["user"]);
   if (explicit) return explicit;
 
-  // Müşteri ihtiyacından seriyi matematiksel akış için kesin eşleştir.
   const userText = getUserMessages(messages).map((m) => String(m?.content || "")).join(" ");
   if (/\b(hepsi|tüm özellik|en iyi|en iyisi|üst segment|kaliteli olsun)\b/i.test(userText)) return "NANO PRO";
   if (/tam karartma|oda karanlığı|ışık geçirmesin|karartma/i.test(userText)) return "NANO PRO";
@@ -58,19 +56,16 @@ function detectSeries(messages) {
   if (/desenli|daha kalın|daha kalin|şık|sik|dekoratif/i.test(userText)) return "NEO FASHION";
   if (/mahremiyet|standart güneş|ekonomik|uygun fiyat/i.test(userText)) return "NOVA";
 
-  // Satış danışmanı daha önce tek bir seri önerdiyse o öneriyi kullan.
   return detectLatest(messages, SERIES_PATTERNS, ["assistant"]);
 }
 
 function detectServiceType(messages) {
-  // Müşteri açıkça hizmet tipi söylediyse önceliklidir.
   const explicit = detectLatest(messages, [
     ["montajli", /montajlı|montajli|montaj dahil/i],
     ["demonte", /montajsız|montajsiz|demonte|kargolu|kargo ile/i],
   ], ["user"]);
   if (explicit) return explicit;
 
-  // Önceki danışman mesajında şehir dışı/yurt dışı için demonte akışı kesinleşmiş olabilir.
   return detectLatest(messages, [
     ["montajli", /montajlı hizmet|montaj dahil/i],
     ["demonte", /demonte gönderim|demonte\/kargolu|kargolu gönderim/i],
@@ -83,6 +78,14 @@ function detectGaziantep(messages) {
 
 function isPriceRequest(text) {
   return /fiyat|tutar|kaç tl|kac tl|ne kadar|hesap|ücret|ucret|maliyet|ortalama/i.test(String(text || ""));
+}
+
+function isFabricListRequest(text) {
+  return /kumaş\s*(?:çeşit|cesit|seri|model)|hangi\s*kumaş|hangi\s*seri|serileriniz|kumaşlarınız|kumaslariniz|ürün\s*çeşit/i.test(String(text || ""));
+}
+
+function buildFabricListReply() {
+  return "Tabii 😊 Kumaş serilerimiz:\nNOVA 485 TL – ekonomik, mahremiyet ve güneş\nNEO FASHION 545 TL – desenli ve daha kalın\nNANO CLEAN 545 TL – leke tutmaz, kolay temizlenir\nNANO INSULATION 645 TL – aşırı güneş ve ısı yalıtımı\nNANO PRO 845 TL – üst segment; VR01-02 güçlü güneş kontrolü, VR03-04 tam karartma\nHONEYCOMP 1.000 TL – petek yapılı premium seri\n\nFiyatlar demonte birim fiyatlarımızdır. Tüm kumaşlarımız yıkanabilir ve 2 yıl garantilidir 😊";
 }
 
 function extractCamCount(text) {
@@ -116,18 +119,31 @@ function formatMoney(value) {
 }
 
 function roundFriendlyAverage(total) {
-  // Büyük işlerde birim fiyat x adet sonucunu aynen koru. Örn: 99 x 845 = 83.655 TL.
   if (total >= 5000) return total;
   const remainder = total % 100;
   if (remainder === 50) return total;
-  // Küçük yaklaşık teklifler: 970 → 1.000, 1.940 → 2.000.
   return Math.round(total / 100) * 100;
+}
+
+function avoidRepeatedReply(messages, reply) {
+  const normalized = String(reply || "").replace(/\s+/g, " ").trim().toLocaleLowerCase("tr-TR");
+  const repeated = messages.some((message) => {
+    if (message?.role !== "assistant") return false;
+    return String(message?.content || "").replace(/\s+/g, " ").trim().toLocaleLowerCase("tr-TR") === normalized;
+  });
+  return repeated
+    ? "Size aynı cevabı tekrar vermeyeyim 😊 Burada takılmayalım; WhatsApp'tan hemen yardımcı olalım: 0530 028 89 03"
+    : reply;
 }
 
 function buildDeterministicPriceReply(messages) {
   const latestUserMessage = [...messages].reverse().find((message) => message?.role === "user");
   const latestText = String(latestUserMessage?.content || "").trim();
   if (!latestText) return null;
+
+  if (isFabricListRequest(latestText)) {
+    return avoidRepeatedReply(messages, buildFabricListReply());
+  }
 
   const priceContext = getUserMessages(messages).some((message) => isPriceRequest(message?.content));
   if (!priceContext) return null;
@@ -136,27 +152,26 @@ function buildDeterministicPriceReply(messages) {
   const series = detectSeries(messages);
   const serviceType = detectServiceType(messages);
 
-  if (!camCount) return "Tabii 😊 Kaç adet camınız var?";
-  if (!series) return "Cam adedini aldım 😊 Daha çok mahremiyet, güneş, ısı, kolay temizlik ya da karartma için mi düşünüyorsunuz?";
-  if (!serviceType) return "Demonte/kargolu mu, Gaziantep içi montajlı mı düşünüyorsunuz? 😊";
+  let reply;
+  if (!camCount) reply = "Tabii 😊 Kaç adet camınız var?";
+  else if (!series) reply = "Cam adedini aldım 😊 Daha çok mahremiyet, güneş, ısı, kolay temizlik ya da karartma için mi düşünüyorsunuz?";
+  else if (!serviceType) reply = "Demonte/kargolu mu, Gaziantep içi montajlı mı düşünüyorsunuz? 😊";
+  else if (serviceType === "montajli" && !detectGaziantep(messages)) reply = "Montajlı hizmetimiz yalnızca Gaziantep içinde 😊 Uygulama Gaziantep'te mi?";
+  else {
+    const unitPrice = PRICE_LIST[serviceType]?.[series];
+    if (!unitPrice) return null;
+    const averageTotal = roundFriendlyAverage(camCount * unitPrice);
+    const serviceLabel = serviceType === "montajli" ? "montaj dahil" : "demonte";
 
-  if (serviceType === "montajli" && !detectGaziantep(messages)) {
-    return "Montajlı hizmetimiz yalnızca Gaziantep içinde 😊 Uygulama Gaziantep'te mi?";
+    if (serviceType === "montajli") {
+      const roadFeeNote = camCount < 5 ? " 5 adet altı montajlarda mesafeye göre ekstra yol ücreti çıkabilir." : "";
+      reply = `${camCount} cam için ${series} ${serviceLabel} ortalama ${formatMoney(averageTotal)} TL tutar 😊 Fiyat cam balkon tipi ve ölçülere göre değişebilir.${roadFeeNote}\n\nNet fiyat montaj ekibimizin ölçüsü sonrası belli olur.`;
+    } else {
+      reply = `${camCount} cam için ${series} demonte ortalama ${formatMoney(averageTotal)} TL tutar 😊 Fiyat cam balkon tipi ve ölçülere göre değişebilir.\n\nNet fiyat için ölçülerinizi WhatsApp'tan gönderebilirsiniz: 0530 028 89 03`;
+    }
   }
 
-  const unitPrice = PRICE_LIST[serviceType]?.[series];
-  if (!unitPrice) return null;
-
-  const rawTotal = camCount * unitPrice;
-  const averageTotal = roundFriendlyAverage(rawTotal);
-  const serviceLabel = serviceType === "montajli" ? "montaj dahil" : "demonte";
-
-  if (serviceType === "montajli") {
-    const roadFeeNote = camCount < 5 ? " 5 adet altı montajlarda mesafeye göre ekstra yol ücreti çıkabilir." : "";
-    return `${camCount} cam için ${series} ${serviceLabel} ortalama ${formatMoney(averageTotal)} TL tutar 😊 Fiyat cam balkon tipi ve ölçülere göre değişebilir.${roadFeeNote}\n\nNet fiyat montaj ekibimizin ölçüsü sonrası belli olur.`;
-  }
-
-  return `${camCount} cam için ${series} demonte ortalama ${formatMoney(averageTotal)} TL tutar 😊 Fiyat cam balkon tipi ve ölçülere göre değişebilir.\n\nNet fiyat için ölçülerinizi WhatsApp'tan gönderebilirsiniz: 0530 028 89 03`;
+  return avoidRepeatedReply(messages, reply);
 }
 
 module.exports = {
