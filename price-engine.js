@@ -232,7 +232,8 @@ function buildDeterministicPriceReply(messages) {
   }
 
   const calculatedTotal = totalSquareMeters * unitPrice;
-  const roundedAverageTotal = Math.round(calculatedTotal / 10) * 10;
+  // Müşteriye verilen yaklaşık fiyatı en yakın 100 TL'ye yuvarla. Örn: 960 TL → 1.000 TL.
+  const roundedAverageTotal = Math.round(calculatedTotal / 100) * 100;
   const serviceLabel = serviceType === "montajli" ? "montajlı" : "demonte";
   const estimateNote = isCamEstimate
     ? " Ölçü olmadığı için bu ortalama ön fiyattır."
