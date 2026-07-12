@@ -64,7 +64,7 @@ function isOrderIntent(text) {
 }
 
 function buildFabricListReply() {
-  return "Tabii 😊 Kumaş serilerimiz:\nNOVA 485 TL – ekonomik, mahremiyet ve güneş\nNEO FASHION 545 TL – desenli ve daha kalın\nNANO CLEAN 545 TL – leke tutmaz, kolay temizlenir\nNANO INSULATION 645 TL – aşırı güneş ve ısı yalıtımı\nNANO PRO 845 TL – üst segment; VR01-02 güçlü güneş kontrolü, VR03-04 tam karartma\nHONEYCOMP 1.000 TL – petek yapılı premium seri\n\nTüm kumaşlarımız yıkanabilir ve 2 yıl garantilidir 😊";
+  return "NOVA 485 TL – ekonomik\nNEO FASHION 545 TL – desenli\nNANO CLEAN 545 TL – kolay temizlenir\nNANO INSULATION 645 TL – yalıtımlı\nNANO PRO 845 TL – güçlü güneş kontrolü / karartma\nHONEYCOMP 1.000 TL – premium\n\nTüm kumaşlarımız yıkanabilir ve 2 yıl garantilidir 😊";
 }
 
 function extractCamCount(text) {
@@ -112,7 +112,7 @@ function avoidRepeatedReply(messages, reply) {
   });
 
   return repeated
-    ? `Burada sizi tekrar bekletmeyeyim 😊 WhatsApp'tan hemen devam edebiliriz: ${WHATSAPP_PHONE}`
+    ? `Detaylı bilgi için WhatsApp: ${WHATSAPP_PHONE}`
     : reply;
 }
 
@@ -122,7 +122,7 @@ function buildDeterministicPriceReply(messages) {
   if (!latestText) return null;
 
   if (isOrderIntent(latestText)) {
-    return `Memnuniyetle 😊 Sipariş işlemlerimizi WhatsApp üzerinden oluşturuyoruz: ${WHATSAPP_PHONE}`;
+    return `Sipariş için WhatsApp: ${WHATSAPP_PHONE}`;
   }
 
   if (isFabricListRequest(latestText)) {
@@ -141,14 +141,12 @@ function buildDeterministicPriceReply(messages) {
     );
   }
 
-  // İlk hızlı ortalama teklif daima ekonomik başlangıç serisi NOVA üzerinden verilir.
-  // Müşteri açıkça başka bir seri seçmişse o serinin demonte birim fiyatı kullanılır.
   const series = detectSeries(messages) || "NOVA";
   const unitPrice = PRICE_LIST.demonte[series];
   if (!unitPrice) return null;
 
   const averageTotal = roundFriendlyAverage(camCount * unitPrice);
-  const reply = `${camCount} cam için ${series} serisi ortalama ${formatMoney(averageTotal)} TL civarında tutar 😊 Fiyat cam tipi ve ölçülere göre değişebilir.\n\nÜrünlerimizi inceleyebilirsiniz:\n${PRODUCT_URL}`;
+  const reply = `${camCount} cam için ${series} ortalama ${formatMoney(averageTotal)} TL civarında tutar 😊 Fiyat ölçülere göre değişebilir.\n${PRODUCT_URL}`;
 
   return avoidRepeatedReply(messages, reply);
 }
