@@ -94,6 +94,12 @@ function isOrderIntent(text) {
   return /sipariş\s*(?:ver|oluştur|oluşturalım|oluşturalim)|almak\s*istiyorum|satın\s*almak|satin\s*almak|tamam\s*alayım|tamam\s*alayim|siparişimi/i.test(String(text || ""));
 }
 
+function isThanksIntent(text) {
+  return /^\s*(?:çok\s+)?teşekkür(?:ler|\s+ederim)?[.!😊🙂☺️🙏\s]*$/iu.test(String(text || "")) ||
+    /^\s*sağ\s*ol(?:un)?[.!😊🙂☺️🙏\s]*$/iu.test(String(text || "")) ||
+    /^\s*eyvallah[.!😊🙂☺️🙏\s]*$/iu.test(String(text || ""));
+}
+
 function isMeasurementRequest(text) {
   return /ölçü\s*(?:alabilir|alır|alir|aldır|aldir|almak|aldırmak)|ölçüye\s*gel|keşif|kesif/i.test(String(text || ""));
 }
@@ -171,7 +177,11 @@ function buildDeterministicPriceReply(messages) {
   const previousAssistantText = getPreviousAssistantText(messages);
   if (!latestText) return null;
 
-  // Niyet tabanlı cevaplar fiyat akışından önce değerlendirilir.
+  // Son mesaj niyeti her zaman geçmiş fiyat bağlamından önce değerlendirilir.
+  if (isThanksIntent(latestText)) {
+    return "Rica ederiz 😊";
+  }
+
   if (isOrderIntent(latestText)) {
     return `Sipariş için WhatsApp: ${WHATSAPP_PHONE}`;
   }
