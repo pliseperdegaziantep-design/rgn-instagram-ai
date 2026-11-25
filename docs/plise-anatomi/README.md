@@ -73,3 +73,41 @@ Onaylanmış örnek kareler (3 kanat, karşıdan): `f7ecfee6-927e-4731-a3d7-befb
 - Kapanış: "Bu fiyatlar için son gün 31 Aralık. Plise Perde Gaziantep. Evinize şimdiden hayırlı olsun."
 - Fiyat rakamı yazılmaz/söylenmez. "Antep" değil **Gaziantep**.
 - Seslendirme metninde "Pilise" yazılır (net telaffuz), altyazıda "Plise".
+
+---
+
+## 8. Güncelleme — kancalı sistem (işletmenin "kancalı plise 3D montaj" videosundan)
+
+Ürünün adı: **Kancalı Plise Perde** — cam balkona delmeden, vidasız montaj. Matkap yok, vida yok, sadece **4 kanca**.
+
+### Parçalar
+- **Üst perde profili + plise kumaş + alt perde profili** tek parça gelir; kancalar iple profile bağlıdır.
+- **Kanca (4 adet / kanat):** küçük mat **antrasit** dikdörtgen gövde (cam balkon profiliyle aynı renk, ~2 × 4,5 cm), ön yüzü kapalı. Bir ucundan **2 ince çelik tel** çıkar. Yay ve halka arka yüzdedir, içe bakar (önden görünmez).
+- **İp:** her kancadan profile giden ince ip; kanadın yan kenarı boyunca düz iner.
+
+### Montaj yeri
+- **Üst kancalar (×2):** kanadın üst iki köşesinde; teller **yukarı** bakar ve üst profilin boşluğuna köşeden takılır.
+- **Alt kancalar (×2):** kanadın alt iki köşesinde; teller **aşağı** bakar ve alt profilin boşluğuna köşeden takılır.
+
+### Kullanım (üç hareket)
+1. Alt profili aşağı çek → perde kapanır.
+2. Üst profili indir → üstten ışık alınır (yukarıdan açılır).
+3. Alt profili kaldır → istenen yükseklikte kalır (aşağıdan açılır).
+
+### Renk
+- Reklam denemesinde kumaş füme gri; yan kanatlar da aynı renk. Aparatlar her zaman profil rengi (antrasit).
+
+### Marka bilgileri (videodan)
+- Logo: sarı zemin üzerine "PLİSE / GAZİANTEP" rozet + "Plise Perde Gaziantep".
+- Mesajlar: "Delmeden takılır, profiline zarar vermez." · Delme yok · Vida yok · Sadece 4 kanca · Kiracılar için ideal · Aşağıdan & yukarıdan açılır · 81 ile kargo.
+- Telefon: 0530 028 89 03 · Site: pliseperdegaziantep.com
+
+## 9. Hareketli perde sahnesi nasıl üretilir (kusursuz hareket için)
+
+Yapay zekâ videosu perde inerken kumaşı bozuyor (eriyen pileler, kayan doku, yumuşayan profil). Çözüm:
+1. Başlangıç karesi yapay zekâyla üretilir (3 kanat, yanlar kapalı, orta toplanmış, kişi arkadan).
+2. Video üretilir (sabit kamera).
+3. Ortadaki perde her karede yeniden kurulur: kapalı yan perdenin kumaşı doku olarak alınır ve
+   üst profil ile alt profil arasına dikey ölçeklenir (aynı pile sayısı, aynı ip hattı);
+   alt profil sert tek parça olarak çizilir; kişinin maskesi üstüne bindirilir.
+   Profilin konumu, orijinal videodaki perde alt kenarından kare kare ölçülür.
