@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Higgsfield__sandbox_exec",
+      "mcp__Higgsfield__jobs_wait",
+      "mcp__Higgsfield__media_upload",
+      "mcp__Higgsfield__media_confirm"
+    ]
+  }
+}
